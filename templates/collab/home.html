@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}방 목록 · CodingLine{% endblock %}
+
+{% block content %}
+  <!-- 모바일 검색 -->
+  <form action="{% url 'home' %}" method="get" class="md:hidden mb-4">
+    <input name="q" value="{{ q }}" placeholder="방 검색"
+           class="border rounded px-3 py-2 w-full" />
+  </form>
+
+  <div class="grid md:grid-cols-3 gap-6">
+    <!-- 좌: 방 생성 -->
+    <section class="md:col-span-1">
+      <div class="bg-white border rounded-xl p-4">
+        <h2 class="font-semibold mb-3">새 방 만들기</h2>
+        <form action="{% url 'home' %}" method="post" class="space-y-3">
+          {% csrf_token %}
+          {{ form.non_field_errors }}
+          <div>
+            <label class="text-sm">방 제목</label>
+              {{ form.Romname }}
+              {{ form.Romname.errors }}
+          </div>
+          <div>
+            <label class="text-sm">주제</label>
+            {{ form.topic}}
+            {{ form.topic.errors }}
+          </div>
+          <div class="flex items-center gap-2">
+            {{ form.is_private }} <span>비공개</span>
+          </div>
+          <button class="bg-blue-600 text-white px-4 py-2 rounded w-full">
+            만들기
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- 우: 방 목록 -->
+    <section class="md:col-span-2">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">방 목록</h2>
+        {% if q %}<span class="text-sm text-gray-500">“{{ q }}” 검색 결과</span>{% endif %}
+      </div>
+
+      <ul class="space-y-3">
+        {% for r in rooms %}
+          <li class="bg-white border rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <div class="font-medium">{{ r.Romname }}</div>
+              <div class="text-sm text-gray-500">
+                주제: {{ r.topic }} · 생성: {{ r.created_at|date:"Y-m-d H:i" }}
+              </div>
+            </div>
+            <a href="{% url 'room-detail' r.slug %}"
+               class="text-blue-600">입장</a>
+          </li>
+        {% empty %}
+          <li class="text-gray-500">표시할 방이 없습니다.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+{% endblock %}

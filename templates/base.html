@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}CodingLine{% endblock %}</title>
+  <!-- 개발용: Tailwind CDN (운영은 정적 빌드 권장) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <!-- 상단 네비 -->
+  <nav class="bg-white border-b">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="{% url 'home' %}" class="font-bold text-lg">CodingLine</a>
+      <div class="flex items-center gap-4">
+        <form action="{% url 'home' %}" method="get" class="hidden md:block">
+          <input name="q" value="{{ q }}" placeholder="방 검색"
+                 class="border rounded px-3 py-1 w-64" />
+        </form>
+        {% if request.user.is_authenticated %}
+          <span class="text-sm">안녕하세요, {{ request.user.username }}님</span>
+          <a class="text-blue-600" href="{% url 'account_logout' %}">로그아웃</a>
+        {% else %}
+          <a class="text-blue-600" href="{% url 'account_login' %}">로그인</a>
+          <a class="text-blue-600" href="{% url 'account_signup' %}">회원가입</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <!-- Django messages -->
+  <div class="max-w-5xl mx-auto px-4 mt-4">
+    {% for m in messages %}
+      <div class="mb-2 rounded px-4 py-2
+                  {% if m.tags == 'success' %}bg-green-100 text-green-800
+                  {% elif m.tags == 'error' %}bg-red-100 text-red-800
+                  {% else %}bg-gray-100{% endif %}">
+        {{ m }}
+      </div>
+    {% endfor %}
+  </div>
+
+  <!-- 페이지 내용 -->
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
