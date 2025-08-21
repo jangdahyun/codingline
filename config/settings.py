@@ -229,5 +229,8 @@ LOGGING = {
 # ───────────────────────────────────────────────────────────────────── ─ 소셜 어댑터 설정
 SOCIALACCOUNT_ADAPTER = "accounts.adapters.MySocialAccountAdapter"
 
+# 로그인 확인화면 Pass
+SOCIALACCOUNT_LOGIN_ON_GET = True
+
 
 
