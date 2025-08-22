@@ -1,89 +1,70 @@
-{% load i18n socialaccount static %}
+{% load i18n static %}
 <!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% trans "로그인" %}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'css/login.css' %}">
+  <!-- 중요: 회원가입과 동일한 CSS만 사용 -->
+  <link id="auth-style" rel="stylesheet" href="{% static 'css/signup.css' %}">
 </head>
 <body class="page-body">
-  <main class="page-main">
-    <section class="login-section">
-      <div class="login-container">
-        <header class="login-header">
-          <h1 class="login-title">{% trans "다시 만나서 반가워요!" %}</h1>
-          <p class="login-subtitle">{% trans "계정에 로그인하세요" %}</p>
-        </header>
+  <div class="bg-layer"></div>
 
-        <div class="login-card">
-          <!-- ▼▼▼ 이 래퍼의 내부만 교체됩니다 ▼▼▼ -->
-          <div id="authView" data-view="login">
-            <form method="post" action="{% url 'account_login' %}" class="login-form">
-              {% csrf_token %}
+  <main class="modal-shell" role="dialog" aria-labelledby="loginTitle" aria-modal="true">
+    <aside class="modal-side">
+      <div class="side-graphic" aria-hidden="true"></div>
+      <h2 class="side-title">{% trans "다시 만나서 반가워요!" %}</h2>
+      <p class="side-subtitle">{% trans "계정으로 바로 시작해요." %}</p>
+    </aside>
 
-              {% if form.non_field_errors %}
-              <div class="form-error-global">
-                {{ form.non_field_errors }}
-              </div>
-              {% endif %}
+    <section class="modal-content">
+      <header class="content-header">
+        <h1 id="loginTitle" class="content-title">{% trans "로그인" %}</h1>
+      </header>
 
-              <div class="form-group">
-                <label for="id_login">{% trans "아이디 또는 이메일" %}</label>
-                <input id="id_login" name="login" type="text"
-                       placeholder="example@email.com"
-                       value="{{ form.login.value|default_if_none:'' }}" required />
-                <div class="form-error">{{ form.login.errors }}</div>
-              </div>
+      <!-- ▼▼▼ 오직 이 내부만 교체됩니다 ▼▼▼ -->
+      <div id="authView" data-view="login">
+        <form method="post" action="{% url 'account_login' %}" class="signup-form" novalidate>
+          {% csrf_token %}
 
-              <div class="form-group">
-                <div class="form-label-row">
-                  <label for="id_password">{% trans "비밀번호" %}</label>
-                  <a href="{% url 'account_reset_password' %}" class="form-link">{% trans "비밀번호를 잊으셨나요?" %}</a>
-                </div>
-                <input id="id_password" name="password" type="password" placeholder="••••••••" required />
-                <div class="form-error">{{ form.password.errors }}</div>
-              </div>
+          {% if form.non_field_errors %}
+            <div class="form-error-global">{{ form.non_field_errors }}</div>
+          {% endif %}
 
-              {% if form.remember %}
-              <label class="form-remember">
-                {{ form.remember }} <span>{% trans "로그인 상태 유지" %}</span>
-              </label>
-              {% endif %}
-
-              {% if redirect_field_value %}
-                <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
-              {% endif %}
-
-              <button type="submit" class="btn-submit">{% trans "로그인" %}</button>
-
-              <div class="divider"><span>{% trans "또는" %}</span></div>
-
-              <div class="social-buttons">
-                <a href="{% provider_login_url 'kakao' %}" class="btn-social kakao">
-                  {% trans "카카오로 계속" %}
-                </a>
-              </div>
-
-              <p class="login-footer">
-                {% trans "계정이 없으신가요?" %}
-                <!-- 여기! 실제 회원가입 URL, PJAX 대상 -->
-                <a href="{% url 'account_signup' %}" class="auth-nav">{% trans "가입하기" %}</a>
-              </p>
-            </form>
+          <div class="form-group">
+            <label for="id_login">{% trans "이메일 또는 사용자명" %}</label>
+            <input id="id_login" name="login" type="text"
+                   value="{{ form.login.value|default_if_none:'' }}"
+                   placeholder="you@example.com" required />
+            {% if form.login.errors %}<p class="form-error">{{ form.login.errors|striptags }}</p>{% endif %}
           </div>
-          <!-- ▲▲▲ 교체 영역 끝 ▲▲▲ -->
-        </div>
+
+          <div class="form-group">
+            <div class="label-row">
+              <label for="id_password">{% trans "비밀번호" %}</label>
+              <button type="button" class="link-small" data-toggle="#id_password">{% trans "표시" %}</button>
+            </div>
+            <input id="id_password" name="password" type="password" placeholder="••••••••" required />
+            {% if form.password.errors %}<p class="form-error">{{ form.password.errors|striptags }}</p>{% endif %}
+          </div>
+
+          <button type="submit" class="btn-primary">{% trans "로그인" %}</button>
+
+          <p class="switch-auth">
+            {% trans "처음이신가요?" %}
+            <!-- 회원가입 URL, PJAX 대상 -->
+            <a href="{% url 'account_signup' %}" class="link auth-nav">{% trans "회원가입" %}</a>
+          </p>
+        </form>
       </div>
+      <!-- ▲▲▲ 교체 영역 끝 ▲▲▲ -->
     </section>
   </main>
 
-  <footer class="page-footer">
-    {% trans "이 페이지는 학습/포트폴리오용 클론 UI입니다." %}
-  </footer>
-
-  <!-- PJAX 스크립트 추가 -->
+  <!-- 비밀번호 토글 등 공통 스크립트 -->
+  <script src="{% static 'js/signup.js' %}"></script>
+  <!-- PJAX 스크립트 -->
   <script src="{% static 'js/auth-pjax.js' %}"></script>
 </body>
 </html>

@@ -5,7 +5,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% trans "회원가입" %}</title>
-  <link rel="stylesheet" href="{% static 'css/signup.css' %}">
+  <link id="auth-style" rel="stylesheet" href="{% static 'css/signup.css' %}">
 </head>
 <body class="page-body">
   <div class="bg-layer"></div>
@@ -90,7 +90,7 @@
     </section>
   </main>
 
-  <script src="{% static 'js/discord-signup.js' %}"></script>
+  <script src="{% static 'js/signup.js' %}"></script>
   <!-- PJAX 스크립트 추가 -->
   <script src="{% static 'js/auth-pjax.js' %}"></script>
 </body>
