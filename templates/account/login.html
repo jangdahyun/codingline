@@ -1,4 +1,4 @@
-{% load i18n static %}
+{% load i18n static socialaccount %}
 <!doctype html>
 <html lang="ko">
 <head>
@@ -6,10 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% trans "로그인" %}</title>
   <!-- 중요: 회원가입과 동일한 CSS만 사용 -->
-  <link id="auth-style" rel="stylesheet" href="{% static 'css/signup.css' %}">
+  <link id="auth-style" rel="stylesheet" href="{% static 'css/login_signup.css' %}">
 </head>
 <body class="page-body">
   <div class="bg-layer"></div>
+
+<div id="authView" data-view="login">
 
   <main class="modal-shell" role="dialog" aria-labelledby="loginTitle" aria-modal="true">
     <aside class="modal-side">
@@ -24,7 +26,6 @@
       </header>
 
       <!-- ▼▼▼ 오직 이 내부만 교체됩니다 ▼▼▼ -->
-      <div id="authView" data-view="login">
         <form method="post" action="{% url 'account_login' %}" class="signup-form" novalidate>
           {% csrf_token %}
 
@@ -50,6 +51,31 @@
           </div>
 
           <button type="submit" class="btn-primary">{% trans "로그인" %}</button>
+          <!-- 소셜 로그인: 카카오 -->
+          <div class="social-login">
+            <div class="social-divider" aria-hidden="true">
+              <span>{% trans "또는" %}</span>
+            </div>
+
+            {# PJAX가 가로채지 않도록 class="auth-nav"는 넣지 않습니다 #}
+            <a
+              class="btn-kakao"
+              href="{% provider_login_url 'kakao' process='login' %}{% if redirect_field_value %}?next={{ redirect_field_value|urlencode }}{% endif %}"
+              aria-label="{% trans '카카오로 로그인' %}"
+              rel="nofollow"
+            >
+              {% trans "카카오로 계속하기" %}
+            </a>
+
+            <a
+              class="btn-naver"
+              href="{% provider_login_url 'naver' process='login' %}{% if redirect_field_value %}?next={{ redirect_field_value|urlencode }}{% endif %}"
+              aria-label="{% trans '네이버로 로그인' %}"
+              rel="nofollow"
+              >
+              {% trans "네이버로 계속하기" %}
+          </a>
+        </div>
 
           <p class="switch-auth">
             {% trans "처음이신가요?" %}
@@ -57,10 +83,10 @@
             <a href="{% url 'account_signup' %}" class="link auth-nav">{% trans "회원가입" %}</a>
           </p>
         </form>
-      </div>
       <!-- ▲▲▲ 교체 영역 끝 ▲▲▲ -->
     </section>
   </main>
+</div>
 
   <!-- 비밀번호 토글 등 공통 스크립트 -->
   <script src="{% static 'js/signup.js' %}"></script>

@@ -1,0 +1,142 @@
+{# templates/account/3rdparty_signup.html #}
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<div class="container mx-auto max-w-xl py-8">
+
+  {% if not sociallogin %}
+    <h1 class="text-xl font-bold mb-3">세션이 만료되었어요</h1>
+    <p class="mb-4">소셜 로그인부터 다시 진행해 주세요.</p>
+    <a class="px-4 py-2 rounded bg-black text-white" href="{% url 'account_login' %}">로그인으로</a>
+  {% else %}
+
+    {% with provider=sociallogin.account.provider|default:sociallogin.account.get_provider.name|lower data=sociallogin.account.extra_data %}
+      {{ data|json_script:"sl-extra" }}
+
+      {% if provider|slice:":5" == 'kakao' %}
+        <h1 class="text-2xl font-bold mb-4">카카오 계정으로 추가 정보 입력</h1>
+      {% elif provider|slice:":5" == 'naver' %}
+        <h1 class="text-2xl font-bold mb-4">네이버 계정으로 추가 정보 입력</h1>
+      {% else %}
+        <h1 class="text-2xl font-bold mb-4">소셜 계정으로 추가 정보 입력</h1>
+      {% endif %}
+
+      <div class="rounded border p-4 mb-6">
+        <h2 class="font-semibold mb-3">소셜에서 가져온 프로필</h2>
+
+        {% if provider|slice:":5" == 'kakao' %}
+          {% with profile=data.kakao_account.profile props=data.properties %}
+            {% if profile.profile_image_url or profile.thumbnail_image_url or props.profile_image or props.thumbnail_image %}
+              <img src="{{ profile.profile_image_url|default:profile.thumbnail_image_url|default:props.profile_image|default:props.thumbnail_image }}"
+                   alt="프로필 이미지" width="72" height="72" class="rounded-full mb-3">
+            {% endif %}
+            <p class="mb-1">닉네임: <strong>{{ profile.nickname|default:props.nickname }}</strong></p>
+            <p class="text-sm text-gray-500">카카오는 닉네임/이미지만 저장합니다.</p>
+          {% endwith %}
+
+        {% elif provider|slice:":5" == 'naver' %}
+          {% with resp=data %}
+            {{ resp|json_script:"naver-resp" }}
+            <script>
+              // 🔎 네이버 원본 응답 콘솔
+              try {
+                const resp = JSON.parse(document.getElementById('naver-resp').textContent);
+                console.log('[3rdparty_signup][naver] resp:', resp);
+              } catch (e) { console.warn('naver-resp parse fail', e); }
+            </script>
+            {% if resp.profile_image or resp.profile_image_url %}
+              <img src="{{ resp.profile_image }}" alt="프로필 이미지" width="72" height="72" class="rounded-full mb-3">
+            {% endif %}
+            <p class="mb-1">사용자명: <strong>{{ resp.name}}</strong></p>
+            <p class="mb-1">닉네임: <strong>{{ resp.nickname}}</strong></p>
+            {% if resp.email %}<p class="mb-1">이메일: <strong>{{ resp.email }}</strong></p>{% endif %}
+            {% if resp.birthyear and resp.birthday %}
+              <p class="mb-1">생일: <strong>{{ resp.birthyear }}-{{ resp.birthday }}</strong></p>
+            {% endif %}
+            {% if resp.mobile %}
+              <p class="mb-1">휴대폰: <strong>{{ resp.mobile }}</strong></p>
+            {% endif %}
+            <p class="text-sm text-gray-500">네이버 정보는 동의 범위 내에서, 회원정보에 비어있을 때만 자동 저장됩니다.</p>
+          {% endwith %}
+        {% else %}
+          <p class="text-sm text-gray-500">지원되지 않은 프로바이더 형식입니다.</p>
+        {% endif %}
+      </div>
+
+      {# ✅ 폼: 반드시 socialaccount_signup로 보냄 #}
+      <form id="social-signup-form" method="post" action="{% url 'socialaccount_signup' %}">
+        {% csrf_token %}
+        
+        {# 🔎 폼 에러를 화면에 노출해 원인 파악 #}
+        {% if form.errors %}
+          <pre class="p-3 mb-3 rounded bg-red-50 text-red-700 text-sm">{{ form.errors }}</pre>
+        {% endif %}
+        {% if form.non_field_errors %}
+          <pre class="p-3 mb-3 rounded bg-orange-50 text-orange-700 text-sm">{{ form.non_field_errors }}</pre>
+        {% endif %}
+
+        <div class="mb-4">
+          {{ form.username.label_tag }}<br>
+          {{ form.username }}                  {# ← username 안 내보내면 검증에 막힘 #}
+          {{ form.username.errors }}
+        </div>
+        <ul class="text-xs bg-gray-50 p-2 rounded mb-3">
+        
+        </ul>
+        <div class="mb-4">
+          {{ form.nickname.label_tag }}<br>
+          {{ form.nickname }}                {# ← 닉네임 수정/저장 #}
+          {{ form.nickname.errors }}
+        </div>
+
+        <div class="mb-6">
+          {{ form.email.label_tag }}<br>
+          {{ form.email }}
+          {{ form.email.errors }}
+          <p class="text-xs text-gray-500 mt-1">
+            {% if provider|slice:":5" == 'naver' %}
+              네이버 동의로 이메일이 전달되면, 회원정보가 비어있을 때 자동 저장됩니다.
+            {% else %}
+              필요 시 이메일을 입력하세요.
+            {% endif %}
+          </p>
+        </div>
+
+        <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              {{ form.phone_number.label_tag }}<br>
+              {{ form.phone_number }}
+              {{ form.phone_number.errors }}
+            </div>
+
+            <div>
+              {{ form.birth_date.label_tag }}<br>
+              {{ form.birth_date }}
+              {{ form.birth_date.errors }}
+            </div>
+        </div>
+
+        <button type="submit" class="px-4 py-2 rounded bg-black text-white">가입 완료</button>
+        
+      </form>
+
+      <script>
+        // 🔎 제출 직전에 실제 전송되는 payload 콘솔로 확인
+        document.addEventListener('submit', (e) => {
+          const f = e.target.closest('#social-signup-form');
+          if (!f) return;
+          const fd = new FormData(f);
+          const obj = {};
+          fd.forEach((v, k) => obj[k] = v);
+          console.log('[3rdparty_signup][submit] payload =', obj);
+          // e.preventDefault(); // 디버그를 위해 막고 싶으면 주석 해제
+        });
+      </script>
+    {% endwith %}
+
+    <div class="mt-4">
+      <a href="{% url 'account_login' %}" class="text-sm text-gray-600">다른 방법으로 로그인</a>
+    </div>
+  {% endif %}]
+</div>
+{% endblock %}

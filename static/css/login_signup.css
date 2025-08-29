@@ -75,7 +75,7 @@ body {
 
 .form-hint { margin: 6px 0 0; color: #bdbdbd; font-size: 12px; }
 .form-error { font-size: 12px; color: #ff8f8f; margin-top: 6px; }
-.form-error-global { padding: 10px; background: rgba(255,0,0,.12); color:#ff6b6b; border-radius: 8px; font-size: 13px; }
+.form-error-global {background: rgba(255,0,0,.12); color:#ff6b6b; border-radius: 8px; font-size: 13px; }
 
 /* ===== 버튼/링크 ===== */
 .btn-primary {
@@ -97,3 +97,35 @@ button:focus, a:focus { outline: 2px solid rgba(88,101,242,.6); outline-offset: 
 #authView.is-leaving  { opacity: 0; transform: translateY(6px); }
 #authView.is-entering { opacity: 0; transform: translateY(-6px); }
 #authView.is-entered  { opacity: 1; transform: translateY(0); }
+
+
+/* login_signup.css 등에 */
+.btn-kakao {
+  display: inline-block;
+  width: 25%;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  text-align: center;
+  background: #FEE500;      /* 카카오 노랑 */
+  color: #000;
+  border: 1px solid rgba(0,0,0,.1);
+  font-size: 13px;
+}
+.social-divider {
+  position: relative;
+  margin: 16px 0;
+  text-align: center;
+}
+.social-divider span {
+  padding: 0 8px;
+  background: #fff;
+}
+.social-divider::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  background: rgba(0,0,0,.1);
+}

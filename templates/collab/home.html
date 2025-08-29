@@ -2,6 +2,7 @@
 {% block title %}방 목록 · CodingLine{% endblock %}
 
 {% block content %}
+
   <!-- 모바일 검색 -->
   <form action="{% url 'home' %}" method="get" class="md:hidden mb-4">
     <input name="q" value="{{ q }}" placeholder="방 검색"
@@ -26,6 +27,11 @@
             {{ form.topic}}
             {{ form.topic.errors }}
           </div>
+          <div>
+            <label class="text-sm">암호</label>
+            {{ form.password}}
+            {{ form.password.errors }}
+          </div>
           <div class="flex items-center gap-2">
             {{ form.is_private }} <span>비공개</span>
           </div>
@@ -45,20 +51,172 @@
 
       <ul class="space-y-3">
         {% for r in rooms %}
-          <li class="bg-white border rounded-xl p-4 flex items-center justify-between">
-            <div>
-              <div class="font-medium">{{ r.Romname }}</div>
-              <div class="text-sm text-gray-500">
-                주제: {{ r.topic }} · 생성: {{ r.created_at|date:"Y-m-d H:i" }}
+          {% if not r.is_private or q%}
+            <li class="bg-white border rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <div class="font-medium">{{ r.Romname }}</div>
+                <div class="text-sm text-gray-500">
+                  주제: {{ r.topic }} · 생성: {{ r.created_at|date:"Y-m-d H:i" }} 
+                  · 방장: {{ r.created_by.display_name|default:r.created_by.username}}
+                  {% if r.password%}· 🔒 {% endif %}
+                  {% if r.is_private%}· (비공개) {% endif %}
+                </div>
               </div>
-            </div>
-            <a href="{% url 'room-detail' r.slug %}"
-               class="text-blue-600">입장</a>
-          </li>
+              <a href="{% url 'room-detail' r.slug %}"
+                class="text-blue-600 enter-btn"                 {# JS가 붙을 클래스 #}
+                data-slug="{{ r.slug }}"                         {# 어떤 방인지 식별(뷰 URL 만들 때 사용) #}
+                {% if r.password %}data-locked="1"{% endif %}    {# 비번이 있으면 잠금 플래그 #}
+                >입장
+              </a>
+            </li>
+          {%endif%}
         {% empty %}
           <li class="text-gray-500">표시할 방이 없습니다.</li>
         {% endfor %}
       </ul>
+      <!-- 배너 -->
+      <div id="pwBanner" class="fixed left-0 right-0 bottom-4 mx-auto w-[min(720px,calc(100%-16px))]
+                              hidden z-50">
+        <div class="bg-white border rounded-xl shadow p-4">
+          <div class="flex items-center gap-3">
+            <strong id="pwBannerTitle" class="shrink-0">비밀번호 입력</strong>
+            <input id="pwBannerInput" type="password" class="border rounded px-3 py-2 w-full"
+                  placeholder="방 비밀번호" />
+            <button id="pwBannerSubmit" class="bg-blue-600 text-white px-4 py-2 rounded">입장</button>
+            <button id="pwBannerClose"  class="px-3 py-2 rounded border">닫기</button>
+          </div>
+          <p id="pwBannerErr" class="text-red-600 text-sm mt-2 hidden"></p>
+        </div>
+      </div>
+
+
     </section>
   </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const IS_AUTH   = {{ request.user.is_authenticated|yesno:"true,false" }};  // true/false
+  const LOGIN_URL = "{% url 'account_login' %}";
+  (() => {
+    'use strict';                                      // 엄격 모드(실수 빨리 발견)
+
+  //  상태
+  let current = { slug: null, href: null, enterUrl: null };
+
+  const banner = document.getElementById('pwBanner');
+  const el = {
+    title:  document.getElementById('pwBannerTitle'),
+    input:  document.getElementById('pwBannerInput'),
+    err:    document.getElementById('pwBannerErr'),
+    submit: document.getElementById('pwBannerSubmit'),
+    close:  document.getElementById('pwBannerClose'),
+  };
+
+  // CSRF 토큰 얻기 (페이지 어딘가의 csrf input을 사용)
+  function getCsrfToken() {
+    //  배너에 폼이 없으므로, 페이지에 존재하는 첫 csrf input을 찾습니다.
+    const x = document.querySelector('input[name=csrfmiddlewaretoken]');
+    if (x && x.value) return x.value;
+
+    // 쿠키 fallback (Django 기본 쿠키 이름: csrftoken)
+    const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+
+  // 배너 열기/닫기
+  function openBanner({ slug, title, href, enterUrl }) {
+   current = { slug, href, enterUrl };
+    el.title.textContent = title ? `비밀번호: ${title}` : '비밀번호 입력';
+    el.err.classList.add('hidden');
+    el.input.value = '';
+    banner.classList.remove('hidden');
+    setTimeout(() => el.input.focus(), 0);
+  }
+  function closeBanner() {
+    banner.classList.add('hidden');
+    current = { slug: null, href: null, enterUrl: null };
+  }
+
+  // “입장” 클릭 가로채기: 비번 있으면 이동 막고 배너 오픈
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('a.enter-btn');
+    if (!btn) return;
+
+    if (!IS_AUTH) {
+      e.preventDefault();
+      const nextTarget = btn.getAttribute('href'); // ← 클릭한 링크로 돌아가게
+      window.location.href = `${LOGIN_URL}?next=${encodeURIComponent(nextTarget)}`;
+      return;
+    }
+
+    const locked = btn.hasAttribute('data-locked');
+    if (!locked) return; // 비번 없으면 기본 이동
+
+    e.preventDefault();
+    const slug     = btn.dataset.slug;
+    const title    = btn.closest('li')?.querySelector('.font-medium')?.textContent?.trim() || '';
+    const href     = btn.getAttribute('href');
+    const enterUrl = btn.dataset.enterUrl || `/rooms/${slug}/enter/`; // ← 가능하면 data-enter-url 쓰기
+
+    openBanner({ slug, title, href, enterUrl });
+  });
+  // 배너 닫기
+  el.close.addEventListener('click', closeBanner);
+
+  // 제출 로직
+  async function submitPassword() {
+    if (!current.slug) return;
+
+    el.err.classList.add('hidden');
+    el.submit.disabled = true;
+
+    const csrf = getCsrfToken();
+    const pw   = el.input.value.trim();
+
+    try {
+      const res = await fetch(current.enterUrl, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrf,
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        },
+        body: new URLSearchParams({ password: pw }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        closeBanner();
+        window.location.href = data.next || current.href || `/rooms/${current.slug}/`;
+      } else {
+        el.err.textContent = data.error || '비밀번호가 올바르지 않습니다.';
+        el.err.classList.remove('hidden');
+        el.input.focus(); el.input.select();
+      }
+    } catch (err) {
+      console.error(err);
+      el.err.textContent = '네트워크 오류가 발생했습니다.';
+      el.err.classList.remove('hidden');
+    } finally {
+      el.submit.disabled = false;
+    }
+  }
+
+  el.submit.addEventListener('click', submitPassword);
+
+  // UX: Enter로 제출, Esc로 닫기, 배너 밖 클릭 시 닫기
+  el.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  submitPassword();
+    if (e.key === 'Escape') closeBanner();
+  });
+  document.addEventListener('click', (e) => {
+    if (!banner.classList.contains('hidden') &&
+        !e.target.closest('#pwBanner') &&
+        !e.target.closest('a.enter-btn')) {
+      closeBanner();
+    }
+  });
+})();
+</script>
 {% endblock %}

@@ -5,11 +5,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% trans "회원가입" %}</title>
-  <link id="auth-style" rel="stylesheet" href="{% static 'css/signup.css' %}">
+  <link id="auth-style" rel="stylesheet" href="{% static 'css/login_signup.css' %}">
 </head>
 <body class="page-body">
   <div class="bg-layer"></div>
-
+<div id="authView" data-view="signup">
   <main class="modal-shell" role="dialog" aria-labelledby="signupTitle" aria-modal="true">
     <aside class="modal-side">
       <div class="side-graphic" aria-hidden="true"></div>
@@ -23,7 +23,6 @@
       </header>
 
       <!-- ▼▼▼ 이 래퍼의 내부만 교체됩니다 ▼▼▼ -->
-      <div id="authView" data-view="signup">
         <form method="post" action="{% url 'account_signup' %}" class="signup-form" novalidate>
           {% csrf_token %}
 
@@ -63,14 +62,43 @@
           </div>
 
           <div class="form-group">
+            <label for="id_nickname">닉네임</label>
+            <input id="id_nickname" name="nickname" type="text"
+                  value="{{ form.nickname.value|default_if_none:'' }}" required />
+            {% if form.nickname.errors %}<p class="form-error">{{ form.nickname.errors|striptags }}</p>{% endif %}
+          </div>
+
+          <div class="form-group">
+            <label for="id_phone_number">{% trans "전화번호" %}</label>
+            <input id="id_phone_number" name="phone_number" type="tel"
+                  value="{{ form.phone_number.value|default_if_none:'' }}"
+                  placeholder="010-1234-5678" required />
+            {% if form.phone_number.errors %}<p class="form-error">{{ form.phone_number.errors|striptags }}</p>{% endif %}
+          </div>
+
+          <div class="form-group">
             <label>{% trans "생년월일" %}</label>
+
             <div class="dob-row">
-              <select id="dob_year" name="dob_year" required></select>
-              <select id="dob_month" name="dob_month" required></select>
-              <select id="dob_day" name="dob_day" required></select>
+              <!-- name 제거: 이 셀렉트들은 서버로 안 보냄(보기 용/조합 용) -->
+              <select id="dob_year"  required
+                      data-selected="{{ form.birth_date.value|date:'Y' }}"></select>
+              <select id="dob_month" required
+                      data-selected="{{ form.birth_date.value|date:'n' }}"></select>
+              <select id="dob_day"   required
+                      data-selected="{{ form.birth_date.value|date:'j' }}"></select>
             </div>
+
+            <!-- 진짜로 서버에 보내는 필드(YYYY-MM-DD) -->
+            <input type="hidden" id="id_birth_date" name="birth_date"
+                  value="{{ form.birth_date.value|default_if_none:'' }}" />
+
+            {% if form.birth_date.errors %}
+              <p class="form-error">{{ form.birth_date.errors|striptags }}</p>
+            {% endif %}
             <p class="form-hint">{% trans "만 13세 이상만 가입 가능합니다." %}</p>
           </div>
+
 
           <p class="terms">
             {% trans "가입을 진행하면" %} <a href="#" class="link">{% trans "서비스 약관" %}</a>,
@@ -85,12 +113,12 @@
             <a href="{% url 'account_login' %}" class="link auth-nav">{% trans "로그인" %}</a>
           </p>
         </form>
-      </div>
       <!-- ▲▲▲ 교체 영역 끝 ▲▲▲ -->
     </section>
   </main>
+</div>
 
-  <script src="{% static 'js/signup.js' %}"></script>
+  <script src="{% static 'js/signup.js' %}?v={% now 'U' %}"></script>
   <!-- PJAX 스크립트 추가 -->
   <script src="{% static 'js/auth-pjax.js' %}"></script>
 </body>

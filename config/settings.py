@@ -104,14 +104,18 @@ ACCOUNT_LOGIN_METHODS = {"username", "email"}
 # username을 쓰지 않는다면 아래처럼 email+pw만:
 # ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 # username도 쓰려면:
-ACCOUNT_SIGNUP_FIELDS = ["email*", "username*", "password1*", "password2*"]
+ACCOUNT_SIGNUP_FIELDS = ["email*", "username*", "password1*", "password2*","birth_date*","nickname*", "phone_number*"]
 
 # 이메일 검증 정책: 개발은 optional, 운영은 "mandatory" 권장
 ACCOUNT_EMAIL_VERIFICATION = os.getenv("ACCOUNT_EMAIL_VERIFICATION", "optional").lower()
 
 # (선택) 커스텀 로그인 폼 연결 시
 ACCOUNT_FORMS = {
-    "login": "accounts.forms.MyLoginForm",  # 필요 없으면 제거 가능
+    "login": "accounts.forms.MyLoginForm", 
+    "signup": "accounts.forms.MySignupForm",
+}
+SOCIALACCOUNT_FORMS = {
+    "signup": "accounts.forms.MySocialSignupForm",
 }
 
 # 인증 백엔드: allauth 추가 필수
@@ -139,7 +143,7 @@ DATABASES = {
         "PORT": DB_PORT,
         "OPTIONS": {
             "charset": "utf8mb4",
-            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
+            "init_command": "SET sql_mode='STRICT_TRANS_TABLES', time_zone = '+00:00'",
         },
     }
 }
@@ -195,11 +199,12 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 # Admin의 SocialApp과 중복 설정 시 Admin 값이 우선.
 # ──────────────────────────────────────────────────────────────────────
 SOCIALACCOUNT_PROVIDERS = {
-    "kakao": {
-        "SCOPE": ["profile_nickname", "profile_image"],  # 이메일은 안 줄 수도 있음
+    "kakao": {  # 카카오는 닉네임/이미지만 받도록 유지
+        "SCOPE": ["profile_nickname", "profile_image"],
     },
     "naver": {
-        "SCOPE": ["name", "email"],
+        # 네이버에서 쓰는 필드를 받기 위한 동의 항목들
+        "SCOPE": ["name", "email", "nickname", "profile_image", "birthyear", "birthday", "mobile"],
     },
 }
 
@@ -231,6 +236,25 @@ SOCIALACCOUNT_ADAPTER = "accounts.adapters.MySocialAccountAdapter"
 
 # 로그인 확인화면 Pass
 SOCIALACCOUNT_LOGIN_ON_GET = True
+# 로그아웃시 리다이렉트
+ACCOUNT_LOGOUT_ON_GET=True
+ACCOUNT_LOGOUT_REDIRECT_URL = "/"
+
+# 루트 URL 설정
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = "http"
+
+# 자동 회원가입 비활성화
+SOCIALACCOUNT_AUTO_SIGNUP = False
 
 
 
+# 🔊 개발용 간단 로깅(콘솔)
+LOGGING = {
+    "version": 1,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "accounts": {"handlers": ["console"], "level": "DEBUG"},
+        "allauth":  {"handlers": ["console"], "level": "INFO"},   # 원하면 DEBUG
+        "django.request": {"handlers": ["console"], "level": "WARNING"},
+    },
+}
