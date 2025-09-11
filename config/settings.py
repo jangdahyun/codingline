@@ -34,6 +34,9 @@ ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if not DEBUG el
 # 앱 설정
 # ──────────────────────────────────────────────────────────────────────
 INSTALLED_APPS = [
+    "daphne",                          # ASGI 서버
+    "channels",                         # 채널(웹소켓)
+    
     "django.contrib.admin",          # 관리자
     "django.contrib.auth",           # 인증/권한
     "django.contrib.contenttypes",   # 권한 시스템 보조
@@ -50,8 +53,16 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.naver",  # 네이버 provider
 
     "accounts.apps.AccountsConfig",                      # 커스텀 유저 앱
-    "collab",                        # 협업 앱
+    "collab",                           # 협업 앱
 ]
+ASGI_APPLICATION = "config.asgi.application" # Channels용 ASGI 애플리케이션
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": ["redis://127.0.0.1:6379/0"]},
+    }
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -214,21 +225,27 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # settings.py (파일 하단 어딘가에 추가)
 
 # ────────────────────────────────────────────────────────────────────── 로그 설정
-LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "DEBUG")
+LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "DEBUG").upper()  # 기본 DEBUG, 운영은 INFO 권장
 
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "std": {"format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s", "datefmt": "%H:%M:%S"},
+        "std": {"format": "[%(asctime)s] %(levelname)s %(name)s:" "(%(filename)s:%(lineno)d %(funcName)s): %(message)s","datefmt": "%H:%M:%S"},
     },
     "handlers": {
         "console": {"class": "logging.StreamHandler", "formatter": "std"},
     },
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+
     "loggers": {
-        "django": {"handlers": ["console"], "level": "INFO"},
+        # 장고/써드파티는 너무 시끄럽지 않게
+        "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "allauth": {"handlers": ["console"], "level": "INFO", "propagate": False},
+
+        # 너가 쓰는 앱 로거들
         "accounts": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+        "collab":   {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
     },
 }
 # ───────────────────────────────────────────────────────────────────── ─ 소셜 어댑터 설정
@@ -249,12 +266,12 @@ SOCIALACCOUNT_AUTO_SIGNUP = False
 
 
 # 🔊 개발용 간단 로깅(콘솔)
-LOGGING = {
-    "version": 1,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "loggers": {
-        "accounts": {"handlers": ["console"], "level": "DEBUG"},
-        "allauth":  {"handlers": ["console"], "level": "INFO"},   # 원하면 DEBUG
-        "django.request": {"handlers": ["console"], "level": "WARNING"},
-    },
-}
+# LOGGING = {
+#     "version": 1,
+#     "handlers": {"console": {"class": "logging.StreamHandler"}},
+#     "loggers": {
+#         "accounts": {"handlers": ["console"], "level": "DEBUG"},
+#         "allauth":  {"handlers": ["console"], "level": "INFO"},   # 원하면 DEBUG
+#         "django.request": {"handlers": ["console"], "level": "WARNING"},
+#     },
+# }

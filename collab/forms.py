@@ -4,7 +4,7 @@ from .models import Room
 class RoomCreateForm(forms.ModelForm):
     class Meta:
         model = Room
-        fields = ["Romname", "topic", "is_private", "password"]
+        fields = ["Romname", "topic", "is_private", "password","capacity"]
         widgets = {
             "Romname": forms.TextInput(attrs={
                 "class": "border rounded w-full px-3 py-2",
@@ -20,6 +20,12 @@ class RoomCreateForm(forms.ModelForm):
             "password": forms.PasswordInput(attrs={
                 "class": "border rounded w-full px-3 py-2",
                 "placeholder": "방 비밀번호(선택)",
+            }),
+            "capacity": forms.NumberInput(attrs={
+                "class": "border rounded w-full px-3 py-2",
+                "placeholder": "정원(기본 20)",
+                "min": 1,
+                "max": 20,
             }),
         }
 

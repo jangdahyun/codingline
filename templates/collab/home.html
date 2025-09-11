@@ -35,6 +35,11 @@
           <div class="flex items-center gap-2">
             {{ form.is_private }} <span>비공개</span>
           </div>
+          <div>
+            <label class="text-sm">정원</label>
+            {{ form.capacity}}
+            {{ form.capacity.errors }}
+          </div>
           <button class="bg-blue-600 text-white px-4 py-2 rounded w-full">
             만들기
           </button>

@@ -1,12 +1,213 @@
 {% extends "base.html" %}
 {% block title %}{{ room.Romname }} · CodingLine{% endblock %}
+
 {% block content %}
   <h1 class="text-xl font-semibold mb-4">{{ room.name }}</h1>
   <p class="text-gray-600 mb-6">주제: {{ room.topic }}</p>
 
-  <!-- TODO: 여기서 WebSocket으로 채팅/코드 캔버스 붙일 예정 -->
+  <!-- 방 나가기 버튼 (CSRF 토큰을 JS에서 재사용할 거라 그대로 둠) -->
+  <form action="{% url 'room-leave' room.slug %}" method="post" class="mb-4">
+    {% csrf_token %}
+    <button class="px-3 py-2 rounded border">방 나가기</button>
+  </form>
+
+  <!-- 방장 전용 도구(디자인 유지). unban은 URL 파라미터 대신 POST body로 user_id 전달하도록 수정 -->
+  {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
+    <div class="bg-white border rounded-xl p-4 mb-4">
+      <h3 class="font-medium mb-2">관리자(방장) 도구</h3>
+
+      {% for m in room.memberships.all %}
+        <div class="flex items-center gap-3 py-1">
+          <span>{{ m.user }}</span>
+          {% if not m.is_banned %}
+            <!-- 강퇴는 기존처럼 user_id를 path로 전달 -->
+            <form action="{% url 'api_kick' room.slug m.user_id %}" method="post">
+              {% csrf_token %}
+              <button class="px-2 py-1 border rounded text-red-600">강퇴</button>
+            </form>
+          {% else %}
+            <!-- 밴 해제는 slug만 쓰고, user_id는 hidden으로 POST -->
+            <form action="{% url 'api_unban' room.slug %}" method="post">
+              {% csrf_token %}
+              <input type="hidden" name="user_id" value="{{ m.user_id }}">
+              <button class="px-2 py-1 border rounded">밴 해제</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      <!-- (선택) 테스트 버튼: 필요 없으면 지워도 됨 -->
+      <form action="{% url 'api_kick' room.slug 1 %}" method="post" class="mt-2">
+        {% csrf_token %}
+        <input type="hidden" name="reason" value="테스트" />
+        <button class="px-2 py-1 border rounded text-red-600">유저#1 강퇴(테스트)</button>
+      </form>
+      <form action="{% url 'api_unban' room.slug %}" method="post" class="mt-2">
+        {% csrf_token %}
+        <input type="hidden" name="user_id" value="1">
+        <button class="px-2 py-1 border rounded">유저#1 밴 해제(테스트)</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <!-- 본문 2열 레이아웃은 유지하되, 왼쪽=채팅 / 오른쪽=이미지 기능을 구현 -->
   <div class="grid md:grid-cols-2 gap-6">
-    <div class="bg-white border rounded-xl p-4">채팅 영역(실시간)</div>
-    <div class="bg-white border rounded-xl p-4">코드/주석 캔버스</div>
+    <!-- 왼쪽: 채팅 영역 -->
+    <div class="bg-white border rounded-xl p-4 flex flex-col h-[70vh]">
+      <h2 class="font-semibold mb-2">채팅 영역(실시간)</h2>
+      <!-- 채팅 로그: 스크롤 되는 박스 -->
+      <div id="chat-log" class="flex-1 overflow-y-auto space-y-2 border rounded p-3 bg-gray-50"><!-- 메시지가 여기 쌓임 --></div>
+      <!-- 채팅 입력 폼 -->
+      <form id="chat-form" class="mt-3 flex gap-2">
+        <input id="chat-input" type="text" class="flex-1 border rounded px-3 py-2" placeholder="메시지를 입력하세요" />
+        <button class="px-3 py-2 border rounded">전송</button>
+      </form>
+    </div>
+
+    <!-- 오른쪽: 이미지 업로드/그리드 -->
+    <div class="bg-white border rounded-xl p-4 flex flex-col h-[70vh]">
+      <h2 class="font-semibold mb-2">이미지 영역</h2>
+      <!-- 업로드 폼: multiple 허용 -->
+      <form id="upload-form" class="mb-3 flex items-center gap-2">
+        <input id="image-input" type="file" accept="image/*" multiple class="border rounded px-2 py-1" />
+        <button class="px-3 py-2 border rounded">업로드</button>
+      </form>
+      <!-- 이미지 카드들이 그리드로 나열 -->
+      <div id="image-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto"></div>
+    </div>
   </div>
+
+  <script>
+  (function () {
+    // ───────────────────── 기본 값/DOM 참조 ─────────────────────
+    const slug = "{{ room.slug }}";                                                   // 방 식별자
+    const scheme = (location.protocol === "https:") ? "wss" : "ws";                   // ws/wss 결정
+    const wsUrl = `${scheme}://${location.host}/ws/rooms/${encodeURIComponent(slug)}/`; // 컨슈머 라우트
+    const csrftoken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || ""; // CSRF 재사용
+
+    const $log = document.getElementById('chat-log');          // 채팅 로그 컨테이너
+    const $chatForm = document.getElementById('chat-form');    // 채팅 폼
+    const $chatInput = document.getElementById('chat-input');  // 채팅 입력창
+    const $uploadForm = document.getElementById('upload-form');// 업로드 폼
+    const $imageInput = document.getElementById('image-input');// 파일 입력
+    const $imageGrid = document.getElementById('image-grid');  // 이미지 그리드
+
+    // ───────────────────── 도우미: 엘리먼트 생성 ─────────────────────
+    function el(tag, attrs = {}, ...children) {                 // 태그/속성/자식으로 DOM 생성
+      const n = document.createElement(tag);
+      Object.entries(attrs).forEach(([k, v]) => (v != null) && n.setAttribute(k, v));
+      children.forEach(c => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+      return n;
+    }
+
+    // ───────────────────── 채팅 DOM 추가 ─────────────────────
+    function appendChat({user, message, ts}) {                  // 채팅 한 줄 추가
+      const time = new Date(ts).toLocaleTimeString();
+      const row = el('div', {class: 'text-sm'},
+        el('span', {class: 'font-medium'}, user), document.createTextNode(' : '),
+        el('span', {}, message),
+        el('span', {class: 'text-[11px] text-gray-500 ml-2'}, time)
+      );
+      $log.appendChild(row);
+      $log.scrollTop = $log.scrollHeight;                       // 새 메시지에 스크롤 맞춤
+    }
+
+    // ───────────────────── 이미지 카드 DOM 추가 ─────────────────────
+    function appendImage({id, user, image_url, ts}) {
+      const time = new Date(ts).toLocaleString();
+      const img = el('img', {src: image_url, class: 'w-full h-32 object-cover rounded'});
+      const dl  = el('a', {href: image_url, download: '', class: 'text-xs underline'}, '다운로드');
+      const del = el('button', {class: 'text-xs text-red-600 underline'}, '삭제');
+
+      const header = el('div', {class: 'flex items-center justify-between text-xs mb-1'},
+        el('span', {class: 'text-gray-600'}, user),
+        el('span', {class: 'text-gray-400'}, time)
+      );
+      const actions = el('div', {class: 'flex items-center justify-between mt-1'}, dl, del);
+      const card = el('div', {class: 'border rounded p-2 bg-gray-50'}, header, img, actions);
+
+      // 삭제 버튼: 업로더 또는 방장만 서버에서 허용
+      del.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (!confirm('정말 삭제할까요?')) return;
+        const url = `{% url 'api_image_delete' room.slug 0 %}`.replace('/0/', `/${id}/`); // URL 템플릿을 id로 치환
+        const res = await fetch(url, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
+        const data = await res.json().catch(()=>({}));
+        if (res.ok) card.remove(); else alert(data.error || '삭제 실패');
+      });
+
+      $imageGrid.prepend(card);                                  // 최신이 위로 오도록 prepend
+    }
+
+    // ───────────────────── 초기 로딩(최근 메시지 50개) ─────────────────────
+    (async function initLoad() {
+      try {
+        const res = await fetch(`{% url 'api_messages_list' room.slug %}`); // GET 목록
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.results)) {
+          // 최신이 먼저 오도록 구현된 경우 시간순으로 보이게 reverse 후 append
+          [...data.results].reverse().forEach(m => {
+            if (m.image_url) appendImage({id: m.id, user: m.user, image_url: m.image_url, ts: m.ts});
+            else if (m.content) appendChat({user: m.user, message: m.content, ts: m.ts});
+          });
+        }
+      } catch {}
+    })();
+
+    // ───────────────────── 이미지 업로드(다중) ─────────────────────
+    $uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const files = $imageInput.files;
+      if (!files || files.length === 0) return;                  // 파일 없으면 스킵
+
+      const fd = new FormData();
+      for (const f of files) fd.append('images', f);             // 다중 파일을 동일 키에 append
+      const res = await fetch(`{% url 'api_image_upload' room.slug %}`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken },                   // CSRF 헤더
+        body: fd,                                                // 멀티파트 업로드
+      });
+      if (res.ok) { $imageInput.value = ''; }                    // 성공 시 입력 초기화
+      else {
+        const data = await res.json().catch(()=>({}));
+        alert(data.error || '업로드 실패');
+      }
+    });
+
+    // ───────────────────── WebSocket 연결 및 이벤트 처리 ─────────────────────
+    let socket;
+    function connect() {
+      socket = new WebSocket(wsUrl);                             // 컨슈머에 연결
+      socket.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);                       // 서버 → 클라 이벤트
+          if (data.event === "kicked") {
+            alert(data.msg || "강퇴되었습니다.");
+            location.replace("/?kicked=1");
+          } else if (data.event === "room_closed") {
+            alert(data.msg || "방이 삭제되었습니다.");
+            location.replace("/");
+          } else if (data.event === "chat") {
+            appendChat({user: data.user, message: data.message, ts: data.ts});
+          } else if (data.event === "image") {
+            appendImage({id: data.message_id, user: data.user, image_url: data.image_url, ts: data.ts});
+          }
+        } catch {}
+      };
+      socket.onclose = (e) => {
+        if (![4403, 4404].includes(e.code)) setTimeout(connect, 1000); // 권한/방삭제가 아니면 재연결
+      };
+    }
+    connect();
+
+    // ───────────────────── 채팅 전송(WebSocket) ─────────────────────
+    $chatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = ($chatInput.value || '').trim();
+      if (!text || !socket || socket.readyState !== 1) return;   // 빈 문자열/미연결이면 무시
+      socket.send(JSON.stringify({ action: 'chat', message: text })); // 서버에 chat 액션
+      $chatInput.value = '';                                     // 입력창 비우기
+    });
+  })();
+  </script>
 {% endblock %}
