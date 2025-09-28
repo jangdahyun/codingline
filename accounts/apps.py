@@ -10,6 +10,7 @@ class AccountsConfig(AppConfig):
     name = 'accounts'
 
     def ready(self):
+        import accounts.signals # 신호 처리기 등록
         logger.info("AccountsConfig.ready() called")        # ★ 실행 확인
         autodiscover_modules("external_login")
         logger.info("accounts.external_login imported")     # ★ 모듈 임포트 확인

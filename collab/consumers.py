@@ -1,157 +1,497 @@
-# consumers.py
-from channels.generic.websocket import AsyncJsonWebsocketConsumer  # JSON 송수신에 특화된 Consumer
-from asgiref.sync import sync_to_async                              # 동기 ORM을 비동기에서 안전하게 호출
-from django.db import transaction                                   # 트랜잭션(동시성 안전)
-from django.contrib.auth.models import AnonymousUser                # 비로그인 사용자 표현
-from django.contrib.auth import get_user_model                      # 유저 로딩 함수
-from django.db.models import F                                      # 원자적 +1/-1 연산
-from .models import Room, RoomMember, Message                       # 우리 도메인 모델들
+import asyncio
+import json
+import logging
+from math import log
+import time  # ✅ 버전 스탬프용
+from logui import log_banner_once, log_step
+
+from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from asgiref.sync import sync_to_async, async_to_sync
+from django.db import transaction
+from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth import get_user_model
+from django.db.models import F
+from django.utils import timezone
+from typing import Optional
+
+from .models import Room, RoomMember, Message
+
+logger = logging.getLogger("collab")
+
+SHOW_BANNER = True
+GRACE_SECONDS = 10
+EMPTY_ROOM_SILENT = True
 
 
-class RoomPresenceConsumer(AsyncJsonWebsocketConsumer):             # WebSocket용 Consumer (JSON 기반)
-    async def connect(self):                                        # 클라이언트가 소켓 연결을 시도할 때
-        self.slug = self.scope["url_route"]["kwargs"]["slug"]       # URL 경로에서 방 slug 추출
-        self.user = self.scope.get("user", AnonymousUser())         # 인증 미들웨어가 넣어준 user
+class RoomPresenceConsumer(AsyncJsonWebsocketConsumer):
+    """
+    - connect: slug로 방 로드, 정책 검사, 그룹 조인
+    - disconnect: 지연 정리(유예 후 open_conn 0이면 실제 나감 처리)
+    - receive_json: 클라→서버 액션(chat, typing.*, leave)
+    - chat_message / image / image_message / typing_event / kicked / room_event: 서버/뷰→클라 브로드캐스트
+    """
 
-        if not self.user.is_authenticated:                          # 비로그인은 거절
-            await self.close(code=4001); return
+    async def connect(self):
+        # 배너/로그
+        if SHOW_BANNER:
+            log_banner_once(logger, key="ws-start", title="코딩라인", subtitle="실시간 접속 시작", self_obj=self)
+        log_step(logger, "WS 연결 시도", "connect()", {"상태": "시작"}, self_obj=self)
 
-        room = await self._get_room(self.slug)                      # 슬러그로 방 로드(없으면 None)
-        if not room:                                                # 방이 없으면
-            await self.close(code=4404); return                     # 4404 → Not Found 의미로 사용
-        self.room = room                                            # 인스턴스로 저장(이후에 사용)
+        # 1) URL에서 slug 추출 + 유저 확인
+        self.slug = self.scope["url_route"]["kwargs"]["slug"]
+        self.user = self.scope.get("user", AnonymousUser())
+        if not self.user.is_authenticated:
+            await self.close(code=4001)  # 비로그인
+            return
 
-        # 접속 허용/정원 체크 + 멤버십 upsert + open_conn += 1 (실패 시 False)
-        ok = await self._inc_conn(room.id, self.user.id)            # _inc_conn 내부에서 room.can_enter 검사
-        if not ok:                                                  # 정원/밴 등으로 거절된 경우
-            await self.close(code=4403); return                     # 4403 → Forbidden 의미로 사용
+        # 2) 방 로드
+        room = await self._get_room(self.slug)
+        if not room:
+            await self.close(code=4404)  # 방 없음
+            return
+        self.room = room
 
-        # 그룹 이름 두 가지: 방 공용 / 개인(강퇴 알림용)
-        self.group = f"room_{room.pk}"                              # 방 전체에 브로드캐스트할 그룹
-        self.user_group = f"room_{room.pk}_user_{self.user.pk}"     # 특정 유저에게만 보낼 그룹(강퇴 등)
+        # 3) 입장 정책 검사 + open_conn += 1 (0→1일 때 on_commit에서만 join 브로드캐스트)
+        ok, reason = await self._inc_conn(room.id, self.user.id)   # ← (bool, reason) 받음
+        if not ok:
+            log_step(logger, "입장 거절", "can_enter=False", {
+                "room": room.id, "user": self.user.id, "reason": reason  # ← 왜 거절됐는지 로그
+            }, self_obj=self)
+            await self.close(code=4403)  # ← 강퇴/밴/권한없음 등 명확한 코드
+            return
 
-        # 그룹 가입 (Consumer의 channel_name을 그룹에 등록)
-        await self.channel_layer.group_add(self.group, self.channel_name)      # 공용 그룹 join
-        await self.channel_layer.group_add(self.user_group, self.channel_name) # 개인 그룹 join
+        # 4) 그룹 조인
+        self.group = f"room_{room.pk}"
+        self.user_group = f"room_{room.pk}_user_{self.user.pk}"
+        await self.channel_layer.group_add(self.group, self.channel_name)
+        await self.channel_layer.group_add(self.user_group, self.channel_name)
 
-        await self.accept()                                          # WebSocket 연결 수락(핸드셰이크 완료)
+        # 5) 연결 수락
+        await self.accept()
+        self.left_explicitly = False
+        log_step(logger, "입장", "accept()", {"방": self.room.id, "유저": self.user.id, "그룹": self.group}, self_obj=self)
 
-    async def disconnect(self, code):                                # 소켓이 끊길 때(정상/비정상 모두)
-        # open_conn -= 1 및 마지막이면 멤버십 정리/방장 위임/빈 방 삭제까지 처리
-        await self._dec_conn_and_cleanup(getattr(self, 'room', None), getattr(self, 'user', None))
+        # 6) ✅ 현재 접속자 스냅샷(본인에게만 1회 전송) — 버전 포함
+        members = await self._active_users(self.room.id)  # [{user_id, username, is_owner}, ...]
+        await self.send_json({
+            "event": "presence_snapshot",
+            "version": int(time.time() * 1000),  # 최신 스냅샷 식별용
+            "members": members,
+        })
 
-        # 그룹 해제(등록된 채널 제거)
-        if hasattr(self, 'group'):
-            await self.channel_layer.group_discard(self.group, self.channel_name)      # 공용 그룹 leave
-        if hasattr(self, 'user_group'):
-            await self.channel_layer.group_discard(self.user_group, self.channel_name) # 개인 그룹 leave
+        # ❌ 여기서 별도 user_joined를 쏘지 않습니다.
+        #    실제 join 브로드캐스트는 _inc_conn() 트랜잭션 커밋 후 on_commit에서 0→1일 때만 쏨.
 
-    async def receive_json(self, content, **kwargs):                 # 브라우저 → 서버 JSON 수신 핸들러
-        if content.get('action') == 'chat':                          # 액션이 'chat'이면 채팅 메시지 처리
-            text = (content.get('message') or '').trim() if hasattr(str, 'trim') else (content.get('message') or '').strip()
-            if not text:                                             # 빈 문자열은 무시
+    async def disconnect(self, code):
+        logging.debug("WS disconnect start: code=%s", code)
+
+        # 명시적 퇴장이 아니면 유예 후 정리
+        room_id = getattr(self, "room", None).id if hasattr(self, "room") else None
+        user_id = getattr(self, "user", None).id if hasattr(self, "user") else None
+        if room_id and user_id and not getattr(self, "left_explicitly", False):
+            asyncio.create_task(self._delayed_cleanup(room_id, user_id))
+
+        # 그룹 해제
+        if hasattr(self, "group"):
+            await self.channel_layer.group_discard(self.group, self.channel_name)
+        if hasattr(self, "user_group"):
+            await self.channel_layer.group_discard(self.user_group, self.channel_name)
+
+        logger.debug("WS disconnect: code=%s", code)
+
+    # 현재 방에서 open_conn>0 & 밴 아님 → 유저 목록 (+ is_owner)
+    @sync_to_async
+    def _active_users(self, room_id: int):
+        room = Room.objects.only("id", "created_by_id").get(pk=room_id)
+        qs = (RoomMember.objects
+              .filter(room_id=room_id, is_banned=False, open_conn__gt=0)
+              .select_related("user")
+              .values("user_id", "user__username"))
+        return [
+            {
+                "user_id": x["user_id"],
+                "username": x["user__username"],
+                "is_owner": (x["user_id"] == room.created_by_id),
+            }
+            for x in qs
+        ]
+
+    # ─────────────── 클라 → 서버 ───────────────
+    async def receive_json(self, content, **kwargs):
+        action = content.get("action")
+        if not action:
+            logger.debug("[recv] action missing: %s", content)
+            return
+        if not hasattr(self, "group"):
+            return
+
+        # 1) 채팅
+        if action == "chat":
+            text = (content.get("message") or "").trim() if hasattr(str, "trim") else (content.get("message") or "").strip()
+            if not text:
                 return
-            msg = await self._create_message(self.room.id, self.user.id, text)  # DB에 Message 저장
-            # 방 공용 그룹으로 브로드캐스트 (type 이름과 동일한 메서드가 아래에 있어야 함)
+            log_step(logger, "메시지 수신", "chat", {"길이": len(text)}, self_obj=self)
+            msg_id = await self._save_text_message(self.room.id, self.user.id, text)
             await self.channel_layer.group_send(
                 self.group,
                 {
-                    "type": "chat",                                  # → chat(self, event) 핸들러로 라우팅됨
-                    "user": getattr(self.user, "username", str(self.user.id)),
-                    "message": msg["content"],
-                    "ts": msg["ts"],
-                }
+                    "type": "chat.message",
+                    "message": text,
+                    "sender": getattr(self.user, "username", "user"),
+                    "message_id": msg_id,
+                    "ts": timezone.now().isoformat(),
+                },
             )
-
-    # ----------------------- 서버 → 클라 이벤트 핸들러들 -----------------------
-
-    async def chat(self, event):                                     # group_send(type="chat") 수신
-        await self.send_json({
-            "event": "chat",                                         # 클라에서 구분할 event 키
-            "user": event["user"],                                   # 보낸 사람
-            "message": event["message"],                             # 내용
-            "ts": event["ts"],                                       # 타임스탬프(ISO)
-        })
-
-    async def image(self, event):                                    # group_send(type="image") 수신
-        await self.send_json({
-            "event": "image",                                        # 이미지 업로드 브로드캐스트
-            "user": event["user"],
-            "image_url": event["image_url"],                         # 이미지 URL
-            "message_id": event["message_id"],                       # 메시지 PK
-            "ts": event["ts"],
-        })
-
-    async def kicked(self, event):                                   # group_send(type="kicked") 수신(개인 그룹)
-        await self.send_json({"event": "kicked", "msg": event.get("msg", "")}) # 알림 전송
-        await self.close(code=4403)                                  # 강퇴 시 소켓 종료
-
-    async def room_closed(self, event):                              # (필요 시) 방 삭제 알림
-        await self.send_json({"event": "room_closed", "msg": event.get("msg", "")})
-        await self.close(code=4404)                                  # 방이 사라졌으니 종료
-
-    # ----------------------- DB helpers (동기 ORM → 비동기 래핑) -----------------------
-
-    @sync_to_async
-    def _get_room(self, slug):                                       # 슬러그로 방 로딩
-        try:
-            return Room.objects.get(slug=slug)                       # 존재하면 Room 반환
-        except Room.DoesNotExist:
-            return None                                              # 없으면 None (connect에서 처리)
-
-    @sync_to_async
-    def _create_message(self, room_id: int, user_id: int, text: str):# 채팅 메시지 DB 생성
-        m = Message.objects.create(room_id=room_id, user_id=user_id, content=text)  # 레코드 생성
-        return {"id": m.id, "content": m.content, "ts": m.created_at.isoformat()}   # 직렬화해서 반환
-
-    @sync_to_async
-    def _inc_conn(self, room_id: int, user_id: int) -> bool:         # 접속 시 카운터 증가(+ 입장 허용 검사)
-        User = get_user_model()                                      # 현재 User 모델 가져오기
-        user = User.objects.get(pk=user_id)                          # 유저 로딩
-        room = Room.objects.get(pk=room_id)                          # 방 로딩
-
-        ok, _reason = room.can_enter(user)                           # 밴/정원 정책 검사(모델에 응집)
-        if not ok:                                                   # 입장 불가면
-            return False                                             # connect에서 4403으로 종료
-
-        with transaction.atomic():                                   # 동시성 안전
-            mem, _ = RoomMember.objects.select_for_update().get_or_create(
-                room=room,
-                user=user,
-                defaults={"role": RoomMember.ROLE_MEMBER},           # 없으면 일반 멤버로 생성
-            )
-            mem.open_conn = F('open_conn') + 1                       # 원자적으로 open_conn += 1
-            mem.save(update_fields=['open_conn'])                     # 해당 필드만 업데이트
-        return True                                                  # OK → connect 계속 진행
-
-    @sync_to_async
-    def _dec_conn_and_cleanup(self, room: Room, user):               # 끊김 시 카운터 감소 및 청소
-        if not room or not user:                                     # 이미 실패한 연결 등
             return
 
-        with transaction.atomic():                                   # 동시성 안전
-            try:
-                mem = RoomMember.objects.select_for_update().get(room=room, user=user)  # 멤버 레코드 잠금
-            except RoomMember.DoesNotExist:
-                mem = None
+        # 2) 타이핑 표시
+        if action == "typing.start":
+            await self.channel_layer.group_send(
+                self.group,
+                {"type": "typing.event", "status": "start",
+                 "user_id": self.user.id, "username": getattr(self.user, "username", "user")}
+            )
+            return
+        if action == "typing.stop":
+            await self.channel_layer.group_send(
+                self.group,
+                {"type": "typing.event", "status": "stop",
+                 "user_id": self.user.id, "username": getattr(self.user, "username", "user")}
+            )
+            return
 
-            if mem:
-                if mem.open_conn > 1:                                # 다른 탭이 남아있다면
-                    mem.open_conn = mem.open_conn - 1                # 카운터만 감소
-                    mem.save(update_fields=['open_conn'])
-                else:                                                # 마지막 연결이 끊긴 순간
-                    if mem.role == RoomMember.ROLE_OWNER:            # 방장이면
-                        room.transfer_ownership_to_earliest()         # 방장 위임 시도
+        # 3) 명시적 퇴장
+        if action == "leave":
+            log_step(logger, "명시적 퇴장", "leave", {"유저": self.user.id}, self_obj=self)
+            self.left_explicitly = True
+            await sync_to_async(self._finalize_leave_immediately)(self.room.id, self.user.id)
+            await self.close(code=4000)
+            return
 
-                    if mem.is_banned:                                # 밴 유저는 기록 유지(재입장 방지)
-                        mem.open_conn = 0
-                        mem.save(update_fields=['open_conn'])
-                    else:                                            # 일반 유저는 자동 퇴장
+        logger.debug("[recv] unknown action: %s", action)
+
+    # ─────────────── 서버/뷰 → 클라 ───────────────
+    async def chat_message(self, event):
+        await self.send_json({
+            "event": "chat",
+            "user": event.get("sender", "server"),
+            "message": event["message"],
+            "message_id": event.get("message_id"),
+            "ts": event.get("ts") or timezone.now().isoformat(),
+        })
+
+    async def image(self, event):
+        await self.send_json({
+            "event": "image",
+            "user": event.get("user", "server"),
+            "image_url": event["image_url"],
+            "caption": event.get("caption", ""),
+            "message_id": event.get("message_id"),
+            "ts": event.get("ts") or timezone.now().isoformat(),
+        })
+
+    async def image_message(self, event):
+        await self.send_json({
+            "event": "image",
+            "user": event.get("sender", "server"),
+            "image_url": event["image_url"],
+            "caption": event.get("caption", ""),
+            "message_id": event.get("message_id"),
+            "ts": event.get("ts") or timezone.now().isoformat(),
+        })
+
+    async def typing_event(self, event):
+        await self.send_json({
+            "event": "typing",
+            "status": event.get("status"),
+            "user_id": event.get("user_id"),
+            "username": event.get("username"),
+            "ts": timezone.now().isoformat(),
+        })
+
+    async def kicked(self, event):
+        await self.send_json({"event": "kicked", "msg": event.get("msg", "강퇴되었습니다.")})
+        await self.close(code=4403)
+
+    async def room_closed(self, event):
+        #  "방이 삭제됨" 이벤트 보내고
+        await self.send_json({
+            "event": "room_closed",                # 클라 switch(data.event)에서 받도록
+            "msg": event.get("msg", "방이 삭제되었습니다."),
+            "slug": event.get("slug"),            # 어떤 방인지 식별용
+        })
+        # 곧바로 소켓을 닫아 onclose에서 리다이렉트가 실행되도록
+        await self.close(code=4404)  
+
+    # ✅ room.event → 그대로 전달(공통 브리지)
+    async def room_event(self, event):
+        await self.send_json(event["payload"])
+
+    # ─────────────── 지연 정리(유예 후 최종) ───────────────
+    async def _delayed_cleanup(self, room_id: int, user_id: int):
+        await self._dec_open_conn_only(room_id, user_id)
+        await asyncio.sleep(GRACE_SECONDS)
+        await sync_to_async(self._finalize_leave_if_still_gone)(room_id, user_id)
+
+    # ─────────────── DB helpers ───────────────
+    @sync_to_async
+    def _get_room(self, slug):
+        try:
+            return Room.objects.get(slug=slug)
+        except Room.DoesNotExist:
+            return None
+
+    @sync_to_async
+    def _inc_conn(self, room_id: int, user_id: int) -> bool:
+        log_step(logger, "접속 증가 시도", "open_conn += 1", {"room": room_id, "user": user_id}, self_obj=self)
+
+        User = get_user_model()
+        user = User.objects.get(pk=user_id)
+        room = Room.objects.get(pk=room_id)
+
+        ok, reason = room.can_enter(user)
+        if not ok:
+            log_step(logger, "입장 정책 거절", "can_enter=False", {
+                "room": room.id, "user": user.id, "reason": reason
+            }, self_obj=self)
+            return False, (reason or "입장할 수 없습니다.") 
+
+        with transaction.atomic():
+            is_owner = (room.created_by_id == user.id)
+            mem, created = RoomMember.objects.select_for_update().get_or_create(
+                room=room, user=user,
+                defaults={"role": RoomMember.ROLE_OWNER if is_owner else RoomMember.ROLE_MEMBER},
+            )
+            if is_owner and mem.role != RoomMember.ROLE_OWNER:
+                mem.role = RoomMember.ROLE_OWNER
+
+            was_inactive = (mem.open_conn == 0)
+            mem.open_conn = F("open_conn") + 1
+            mem.save(update_fields=["role", "open_conn"])
+
+            def _broadcast_join():
+                if was_inactive:
+                    async_to_sync(self.channel_layer.group_send)(
+                        f"room_{room.id}",
+                        {"type": "room.event",
+                         "payload": {
+                             "event": "user_joined",
+                             "room_id": room.id,
+                             "user_id": user.id,
+                             "username": getattr(user, "username", "user"),
+                             "is_owner": is_owner,                   # ✅ 정확한 방장 여부
+                             "version": int(time.time() * 1000),     # ✅ 버전 스탬프
+                         }}
+                    )
+            transaction.on_commit(_broadcast_join)
+        return True,None
+
+    @sync_to_async
+    def _dec_open_conn_only(self, room_id: int, user_id: int):
+        try:
+            with transaction.atomic():
+                room = Room.objects.select_for_update().get(pk=room_id)
+                User = get_user_model()
+                user = User.objects.get(pk=user_id)
+                (RoomMember.objects
+                 .select_for_update()
+                 .filter(room=room, user=user, open_conn__gt=0)
+                 .update(open_conn=F("open_conn") - 1))
+        except Room.DoesNotExist:
+            return
+
+    # 명시적 퇴장 (즉시)
+    def _finalize_leave_immediately(self, room_id: int, user_id: int):
+        try:
+            owner_changed_payload = None
+            with transaction.atomic():
+                room = Room.objects.select_for_update().get(pk=room_id)
+                room_slug = room.slug
+                User = get_user_model()
+                user = User.objects.get(pk=user_id)
+                mem = RoomMember.objects.select_for_update().filter(room=room, user=user).first()
+
+                # 연결 감소
+                if mem and mem.open_conn > 0:
+                    mem.open_conn = F("open_conn") - 1
+                    mem.save(update_fields=["open_conn"])
+                    mem.refresh_from_db(fields=["open_conn"])
+                    if mem.open_conn > 0:
+                        return  # 다른 탭 남아있음
+
+                # 진짜 퇴장 처리
+                if mem:
+                    if mem.role == RoomMember.ROLE_OWNER:
+                        new_owner = room.transfer_ownership_to_earliest(demote_previous=False)
                         mem.delete()
+                        if new_owner:
+                            owner_changed_payload = {
+                                "event": "owner_changed",
+                                "room_id": room.id,
+                                "new_owner_id": new_owner.user_id,
+                                "new_owner_name": new_owner.user.username,
+                            }
+                    else:
+                        if mem.is_banned:
+                            RoomMember.objects.filter(pk=mem.pk).update(open_conn=0)
+                        else:
+                            mem.delete()
 
-            # 방에 활성 접속자(open_conn>0, is_banned=False)가 없으면 방 삭제
-            has_active = RoomMember.objects.filter(
-                room=room, is_banned=False, open_conn__gt=0
-            ).exists()
-            if not has_active:
-                room.delete()                                        # 빈 방 자동 삭제
+                has_active = RoomMember.objects.filter(room=room, is_banned=False, open_conn__gt=0).exists()
+                has_owner = RoomMember.objects.filter(room=room, role=RoomMember.ROLE_OWNER).exists()
+                if not has_active and not has_owner:
+                    room.delete()
+                    def _broadcast_room_closed():
+                        async_to_sync(self.channel_layer.group_send)(
+                            f"room_{room_id}",
+                            {"type": "room.closed", "msg": "방이 삭제되었습니다.","slug": room_slug}
+                        )
+                        async_to_sync(self.channel_layer.group_send)(
+                            "lobby",
+                            {"type": "lobby.event", 
+                             "payload": { "event": "room_closed","room_id": room_id, "slug": room_slug}} 
+                        )
+                    transaction.on_commit(_broadcast_room_closed)
+
+
+                def _broadcast():
+                    ver = int(time.time() * 1000)  # ✅ 버전 스탬프
+                    if owner_changed_payload:
+                        owner_changed_payload["version"] = ver
+                        async_to_sync(self.channel_layer.group_send)(
+                            f"room_{room.id}", {"type": "room.event", "payload": owner_changed_payload}
+                        )
+                    async_to_sync(self.channel_layer.group_send)(
+                        f"room_{room_id}",
+                        {"type": "room.event", "payload": {
+                            "event": "user_left",
+                            "room_id": room_id,
+                            "user_id": user_id,
+                            "username": getattr(user, "username", "user"),
+                            "version": ver,  # ✅ 추가
+                        }}
+                    )
+                transaction.on_commit(_broadcast)
+        except Room.DoesNotExist:
+            return
+
+    # 유예 후 최종 판정
+    def _finalize_leave_if_still_gone(self, room_id: int, user_id: int):
+        try:
+            owner_changed_payload = None
+            user_left_payload = None
+            with transaction.atomic():
+                room = Room.objects.select_for_update().get(pk=room_id)
+                User = get_user_model()
+                user = User.objects.get(pk=user_id)
+                mem = RoomMember.objects.select_for_update().filter(room=room, user=user).first()
+
+                if not mem:
+                    user_left_payload = {
+                        "event": "user_left",
+                        "room_id": room_id, "user_id": user_id,
+                        "username": getattr(user, "username", "user"),
+                    }
+                else:
+                    if mem.open_conn > 0:
+                        return  # 재접속
+                    if mem.role == RoomMember.ROLE_OWNER:
+                        new_owner = room.transfer_ownership_to_earliest(demote_previous=False)
+                        mem.delete()
+                        if new_owner:
+                            owner_changed_payload = {
+                                "event": "owner_changed",
+                                "room_id": room.id,
+                                "new_owner_id": new_owner.user_id,
+                                "new_owner_name": new_owner.user.username,
+                            }
+                    else:
+                        if mem.is_banned:
+                            RoomMember.objects.filter(pk=mem.pk).update(open_conn=0)
+                        else:
+                            mem.delete()
+
+                    user_left_payload = {
+                        "event": "user_left",
+                        "room_id": room_id, "user_id": user_id,
+                        "username": getattr(user, "username", "user"),
+                    }
+
+                has_active = RoomMember.objects.filter(room=room, is_banned=False, open_conn__gt=0).exists()
+                has_owner = RoomMember.objects.filter(room=room, role=RoomMember.ROLE_OWNER).exists()
+                if not has_active and not has_owner:
+                    room.delete()
+                    def _broadcast_room_closed():
+                        # 아직 방에 남아있는 사람들(있다면)에게도 알림
+                        async_to_sync(self.channel_layer.group_send)(
+                            f"room_{room_id}",
+                            {"type": "room.closed", "msg": "방이 삭제되었습니다.", "slug": room_slug}
+                        )
+                        # 로비에 알림
+                        async_to_sync(self.channel_layer.group_send)(
+                            "lobby",
+                            {"type": "lobby.event",
+                            "payload": {"event": "room_closed", "room_id": room_id, "slug": room_slug}}
+                        )
+                    transaction.on_commit(_broadcast_room_closed)
+
+                def _broadcast_after_commit():
+                    ver = int(time.time() * 1000)  # 버전 스탬프
+                    if owner_changed_payload:
+                        owner_changed_payload["version"] = ver
+                        async_to_sync(self.channel_layer.group_send)(
+                            f"room_{room.id}", {"type": "room.event", "payload": owner_changed_payload}
+                        )
+                    if user_left_payload:
+                        user_left_payload["version"] = ver
+                        async_to_sync(self.channel_layer.group_send)(
+                            f"room_{room_id}", {"type": "room.event", "payload": user_left_payload}
+                        )
+                transaction.on_commit(_broadcast_after_commit)
+        except Room.DoesNotExist:
+            return
+
+    # 메시지 저장(옵션)
+    @sync_to_async
+    def _save_text_message(self, room_id: int, user_id: int, message: str) -> Optional[int]:
+        try:
+            room = Room.objects.get(pk=room_id)
+            user = get_user_model().objects.get(pk=user_id)
+            m = Message.objects.create(room=room, user=user, content=message)
+            return m.pk
+        except Exception as e:
+            logger.exception("save_text_message failed: %s", e)
+            return None
+
+    @sync_to_async
+    def _save_image_message(self, room_id: int, user_id: int, image_url: str, caption: str) -> Optional[int]:
+        try:
+            room = Room.objects.get(pk=room_id)
+            user = get_user_model().objects.get(pk=user_id)
+            m = Message.objects.create(
+                room=room, user=user,
+                content=json.dumps({"url": image_url, "caption": caption}, ensure_ascii=False),
+            )
+            return m.pk
+        except Exception as e:
+            logger.exception("save_image_message failed: %s", e)
+            return None
+        
+    
+
+
+class LobbyConsumer(AsyncJsonWebsocketConsumer):
+    async def connect(self):
+        await self.channel_layer.group_add("lobby", self.channel_name)
+        await self.accept()
+        self.left_explicitly = False
+        log_step(logger, "로비 WS 연결 성공", "lobby.connect", {"chan": self.channel_name}, self_obj=self)
+
+    async def disconnect(self, code):
+        await self.channel_layer.group_discard("lobby", self.channel_name)
+        log_step(logger, "로비 WS 연결 종료", "lobby.disconnect", {"code": code, "chan": self.channel_name}, self_obj=self)
+
+    async def lobby_event(self, event):
+        payload = event["payload"]
+        await self.send(text_data=json.dumps(payload))
+        log_step(logger, "로비 이벤트 전송", "lobby.event", {"payload": payload}, self_obj=self)

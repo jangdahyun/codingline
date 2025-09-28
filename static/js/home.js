@@ -1,95 +1,156 @@
-// static/js/home.js
+// === 로비 WebSocket: 방 삭제/생성/수정 실시간 반영 (이 블록만 유지!) ===
 (() => {
-  // ---------- 유틸: CSRF 토큰 가져오기 ----------
-  function getCsrfToken() {
-    // 템플릿 폼에 있는 csrfmiddlewaretoken input에서 꺼내도 되고,
-    // 쿠키에서 가져와도 됨. 여기선 폼에서 꺼냄.
-    const el = document.querySelector('#pwForm input[name=csrfmiddlewaretoken]');
-    return el ? el.value : '';
+  const list = document.getElementById("room-list");
+  if (!list) return;
+
+  // 1) WebSocket URL 구성
+  const scheme = (location.protocol === "https:") ? "wss" : "ws";
+  const wsUrl = `${scheme}://${location.host}/ws/lobby/`;
+
+  // 2) 도우미: li 찾기 / 만들기
+  function findItemBySlug(slug) {
+    return list.querySelector(`li[data-room-slug="${slug}"]`);
+  }
+  function removeRoomBySlug(slug) {
+    const li = findItemBySlug(slug);
+    if (li) li.remove();
   }
 
-  // ---------- 모달 제어 ----------
-  const modal = document.getElementById('pwModal');         // 모달 루트
-  const overlay = document.getElementById('pwOverlay');     // 배경
-  const form = document.getElementById('pwForm');           // 폼 엘리먼트
-  const input = document.getElementById('pwInput');         // 비번 입력창
-  const errorEl = document.getElementById('pwError');       // 에러 문구
-  const cancelBtn = document.getElementById('pwCancel');    // 취소 버튼
-  const titleEl = document.getElementById('pwRoomTitle');   // 방 제목(옵션)
-
-  let currentSlug = null;                                    // 현재 검증할 방 slug
-
-  function openModal(slug, roomTitleText) {
-    currentSlug = slug;                                      // 어떤 방에 대해 검증할지 기억
-    titleEl.textContent = roomTitleText ? `방: ${roomTitleText}` : ''; // 제목 표시(옵션)
-    errorEl.classList.add('hidden');                         // 이전 에러 숨김
-    input.value = '';                                        // 입력값 초기화
-    modal.classList.remove('hidden');                        // 표시
-    modal.classList.add('flex');                             // 센터 정렬(flex 컨테이너)
-    setTimeout(() => input.focus(), 0);                      // 포커스
+  // 3) 메타 문자열을 안전하게 만들기
+  function buildMeta({ topic, created_at, owner, locked }) {
+    const bits = [];
+    bits.push(`주제: ${topic || '-'}`);
+    if (created_at) bits.push(`생성: ${created_at}`);
+    if (owner) bits.push(`방장: ${owner}`);
+    if (locked) bits.push('🔒');
+    return bits.join(' · ');
   }
 
-  function closeModal() {
-    modal.classList.add('hidden');                           // 숨김
-    modal.classList.remove('flex');
-    currentSlug = null;                                      // 상태 초기화
-  }
+  // 4) 리스트 카드 생성/갱신(Upsert)
+  function upsertRoomCard({ id, slug, name, topic, owner, created_at, locked }) {
+    // li 찾기: data-room-slug가 주 식별자
+    let li = findItemBySlug(slug);
 
-  overlay.addEventListener('click', closeModal);             // 배경 클릭 시 닫기
-  cancelBtn.addEventListener('click', closeModal);           // 취소 클릭 시 닫기
-  document.addEventListener('keydown', (e) => {              // ESC로 닫기
-    if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
-  });
+    if (!li) {
+      // 새 카드 생성 (템플릿과 클래스 맞춤)
+      li = document.createElement("li");
+      li.className = "item";
+      // 템플릿은 id="room-{{ r.id }}"이지만 이벤트에서 id가 없을 수도 있어서
+      // id가 있으면 room-<id>, 없으면 room-<slug>로 부여
+      li.id = id ? `room-${id}` : `room-${slug}`;
+      li.setAttribute("data-room-slug", slug);
 
-  // ---------- 입장 버튼 가로채기 ----------
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('a.enter-btn');             // 리스트의 "입장" 버튼만 대상
-    if (!btn) return;
-
-    const slug = btn.getAttribute('data-slug');              // 어떤 방?
-    const locked = btn.hasAttribute('data-locked');          // 비번 필요?
-
-    if (!locked) return;                                     // 비번 없으면 그대로 링크 내비게이션 진행
-
-    e.preventDefault();                                      // 기본 이동 막고
-    const roomTitle = btn.closest('li')?.querySelector('.font-medium')?.textContent?.trim() || '';
-    openModal(slug, roomTitle);                              // 모달 오픈
-  });
-
-  // ---------- 비번 제출(fetch POST) ----------
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!currentSlug) return;                                // 안전장치
-    const pw = input.value.trim();
-    const csrf = getCsrfToken();
-
-    try {
-      const res = await fetch(`/rooms/${currentSlug}/enter/`, {
-        method: 'POST',
-        headers: {
-          'X-CSRFToken': csrf,                               // Django CSRF
-          // 아래 둘 중 하나만 사용. 여기선 폼-POST로 보낼게요:
-          // 'Content-Type': 'application/json',
-        },
-        // JSON으로 보낼 수도 있지만, 서버에서 request.POST로 받기 쉽도록 FormData 사용:
-        body: new URLSearchParams({ password: pw }),
-        // JSON으로 보내려면: body: JSON.stringify({ password: pw })
-      });
-
-      const data = await res.json();                         // JSON 파싱
-      if (res.ok && data.ok) {                               // 성공
-        closeModal();                                        // 모달 닫고
-        window.location.href = data.next || `/rooms/${currentSlug}/`; // 상세로 이동
-      } else {                                               // 실패(400 등)
-        errorEl.textContent = (data && data.error) ? data.error : '비밀번호가 올바르지 않습니다.';
-        errorEl.classList.remove('hidden');                  // 에러 표시
-        input.focus();
-        input.select();
-      }
-    } catch (err) {
-      console.error(err);
-      errorEl.textContent = '네트워크 오류가 발생했습니다. 잠시 후 다시 시도하세요.';
-      errorEl.classList.remove('hidden');
+      li.innerHTML = `
+        <div class="item__left">
+          <div class="item__thumb">🏠</div>
+          <div>
+            <div class="item__title font-medium">${name || slug}</div>
+            <div class="item__meta">${buildMeta({ topic, created_at, owner, locked })}</div>
+          </div>
+        </div>
+        <a href="/rooms/${slug}/"
+           class="link enter-btn"
+           data-slug="${slug}"
+           ${locked ? 'data-locked="1"' : ''}>입장</a>
+      `;
+      list.prepend(li);
+      return;
     }
-  });
+
+    // 기존 카드 갱신
+    const titleEl = li.querySelector(".item__title");
+    const metaEl  = li.querySelector(".item__meta");
+    const enter   = li.querySelector("a.enter-btn");
+
+    if (titleEl && name) titleEl.textContent = name;
+    if (metaEl) {
+      // topic/owner/🔒 등 변경 분 반영
+      metaEl.textContent = buildMeta({
+        topic: (topic ?? extractTopic(metaEl.textContent)),
+        created_at: extractCreatedAt(metaEl.textContent, created_at),
+        owner: (owner ?? extractOwner(metaEl.textContent)),
+        locked: (typeof locked === 'boolean') ? locked : metaEl.textContent.includes('🔒'),
+      });
+    }
+    if (enter) {
+      // 잠금 상태 변경 시 버튼 data-locked 토글
+      if (typeof locked === 'boolean') {
+        if (locked) enter.setAttribute('data-locked', '1');
+        else enter.removeAttribute('data-locked');
+      }
+      // slug가 바뀌지 않는 전제(일반적으로 방 slug는 불변)
+      enter.setAttribute('href', `/rooms/${slug}/`);
+      enter.setAttribute('data-slug', slug);
+    }
+  }
+
+  // 5) 기존 메타에서 토막 추출(없으면 기존 유지 목적)
+  function extractTopic(s) {
+    const m = s.match(/주제:\s*([^·]+)/); return m ? m[1].trim() : undefined;
+  }
+  function extractOwner(s) {
+    const m = s.match(/방장:\s*([^·]+)/); return m ? m[1].trim() : undefined;
+  }
+  function extractCreatedAt(s, incoming) {
+    if (incoming) return incoming;
+    const m = s.match(/생성:\s*([^·]+)/);
+    return m ? m[1].trim() : undefined;
+  }
+
+  // 6) 수신 이벤트 스위치
+  function handleLobbyEvent(data) {
+    // 서버에서 보낼 수 있는 키를 널널하게 지원
+    const ev   = data.event;                      // "room_updated" | "room_closed" | "room_created"
+    const slug = data.slug || data.room_slug;     // slug 별칭
+    const id   = data.id   || data.room_id;       // id 별칭
+
+    if (!ev) return;
+
+    if (ev === "room_closed" || ev === "room_deleted") {
+      if (slug) removeRoomBySlug(slug);
+      // (선택) 사용자에게 알림
+      if (typeof window.showToast === "function") {
+        showToast("warning", "방이 삭제되어 목록에서 제거되었습니다.");
+      }
+      return;
+    }
+
+    if (ev === "room_created") {
+      upsertRoomCard({
+        id, slug,
+        name:   data.name   || data.room_name || slug,
+        topic:  data.topic,
+        owner:  data.owner  || data.owner_name,
+        created_at: data.created_at || "방금",
+        locked: !!data.locked,
+      });
+      return;
+    }
+
+    if (ev === "room_updated") {
+      upsertRoomCard({
+        id, slug,
+        name:   data.name   || data.room_name,
+        topic:  data.topic,
+        owner:  data.owner  || data.owner_name,
+        locked: (typeof data.locked === 'boolean') ? data.locked : undefined,
+      });
+      return;
+    }
+  }
+
+  // 7) 소켓 연결/재연결
+  let s;
+  function connect() {
+    s = new WebSocket(wsUrl);
+    s.onopen = () => console.log("✅ 로비 WebSocket 연결됨");
+    s.onerror = (err) => console.error("❌ 로비 WebSocket 에러", err);
+    s.onclose = () => setTimeout(connect, 1000);   // 1초 후 재연결
+    s.onmessage = (e) => {
+      let data; try { data = JSON.parse(e.data); } catch { return; }
+      console.log("로비 메시지 수신:", data);
+      handleLobbyEvent(data);
+    };
+  }
+  connect();
 })();

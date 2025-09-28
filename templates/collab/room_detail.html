@@ -2,106 +2,313 @@
 {% block title %}{{ room.Romname }} · CodingLine{% endblock %}
 
 {% block content %}
-  <h1 class="text-xl font-semibold mb-4">{{ room.name }}</h1>
-  <p class="text-gray-600 mb-6">주제: {{ room.topic }}</p>
+  
+  <h1 id="room-title" class="text-xl font-semibold mb-4">{{ room.Romname }}</h1>
+  <p id="room-topic" class="text-gray-600 mb-6">주제: {{ room.topic }}</p>
 
-  <!-- 방 나가기 버튼 (CSRF 토큰을 JS에서 재사용할 거라 그대로 둠) -->
+  <!-- ✅ 방장만 보이는 액션 버튼 -->
+  {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
+    <div class="flex items-center gap-2 mb-4">
+      <!-- 수정 버튼: 기본 스타일과 유사하게 -->
+      <button id="btn-room-edit" class="px-3 py-2 rounded border">수정하기</button>
+      <!-- 삭제 버튼: 빨간 포커스 -->
+      <button id="btn-room-delete" class="px-3 py-2 rounded border text-red-600">방 삭제</button>
+    </div>
+
+    <!-- ✅ 수정 패널(토글 표시) -->
+    <div id="room-edit-panel" class="bg-white border rounded-xl p-4 mb-4 hidden">
+      <h3 class="font-medium mb-3">방 정보 수정</h3>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <!-- 이름 -->
+        <label class="flex flex-col">
+          <span class="text-sm text-gray-600 mb-1">방 제목</span>
+          <input id="edit-name" type="text" value="{{ room.Romname }}" class="border rounded px-3 py-2" />
+        </label>
+
+        <!-- 주제 -->
+        <label class="flex flex-col">
+          <span class="text-sm text-gray-600 mb-1">주제</span>
+          <input id="edit-topic" type="text" value="{{ room.topic }}" class="border rounded px-3 py-2" />
+        </label>
+
+        <!-- 비밀번호 -->
+        <label class="flex flex-col">
+          <span class="text-sm text-gray-600 mb-1">비밀번호(빈칸=해제)</span>
+          <input id="edit-password" type="text" value="{{ room.password }}" class="border rounded px-3 py-2" />
+        </label>
+
+        <!-- 정원 -->
+        <label class="flex flex-col">
+          <span class="text-sm text-gray-600 mb-1">정원(1~500)</span>
+          <input id="edit-capacity" type="number" min="1" max="500" value="{{ room.capacity }}" class="border rounded px-3 py-2" />
+        </label>
+      </div>
+
+      <div class="mt-3 flex items-center gap-2">
+        <button id="btn-room-save" class="px-3 py-2 rounded border">저장</button>
+        <button id="btn-room-cancel" class="px-3 py-2 rounded border">취소</button>
+        <span id="edit-error" class="text-sm text-red-600 ml-2 hidden">저장에 실패했습니다.</span>
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- 방 나가기 버튼 -->
   <form action="{% url 'room-leave' room.slug %}" method="post" class="mb-4">
     {% csrf_token %}
     <button class="px-3 py-2 rounded border">방 나가기</button>
   </form>
 
-  <!-- 방장 전용 도구(디자인 유지). unban은 URL 파라미터 대신 POST body로 user_id 전달하도록 수정 -->
-  {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
+  <!-- 🔥 관리자(방장) 도구 -->
+  {% comment %} {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
     <div class="bg-white border rounded-xl p-4 mb-4">
       <h3 class="font-medium mb-2">관리자(방장) 도구</h3>
-
-      {% for m in room.memberships.all %}
-        <div class="flex items-center gap-3 py-1">
-          <span>{{ m.user }}</span>
-          {% if not m.is_banned %}
-            <!-- 강퇴는 기존처럼 user_id를 path로 전달 -->
-            <form action="{% url 'api_kick' room.slug m.user_id %}" method="post">
-              {% csrf_token %}
-              <button class="px-2 py-1 border rounded text-red-600">강퇴</button>
-            </form>
-          {% else %}
-            <!-- 밴 해제는 slug만 쓰고, user_id는 hidden으로 POST -->
-            <form action="{% url 'api_unban' room.slug %}" method="post">
-              {% csrf_token %}
-              <input type="hidden" name="user_id" value="{{ m.user_id }}">
-              <button class="px-2 py-1 border rounded">밴 해제</button>
-            </form>
-          {% endif %}
-        </div>
-      {% endfor %}
-
-      <!-- (선택) 테스트 버튼: 필요 없으면 지워도 됨 -->
-      <form action="{% url 'api_kick' room.slug 1 %}" method="post" class="mt-2">
-        {% csrf_token %}
-        <input type="hidden" name="reason" value="테스트" />
-        <button class="px-2 py-1 border rounded text-red-600">유저#1 강퇴(테스트)</button>
-      </form>
-      <form action="{% url 'api_unban' room.slug %}" method="post" class="mt-2">
-        {% csrf_token %}
-        <input type="hidden" name="user_id" value="1">
-        <button class="px-2 py-1 border rounded">유저#1 밴 해제(테스트)</button>
-      </form>
+      <!-- 실시간 사용자 목록 -->
+      <ul id="user-list" class="space-y-2"></ul>
     </div>
-  {% endif %}
+  {% endif %} {% endcomment %}
 
-  <!-- 본문 2열 레이아웃은 유지하되, 왼쪽=채팅 / 오른쪽=이미지 기능을 구현 -->
+<!-- 🔥 접속자 리스트 (모든 로그인 사용자에게 표시) -->
+{% if request.user.is_authenticated %}
+  <div class="bg-white border rounded-xl p-4 mb-4">
+    <h3 class="font-medium mb-2">접속자 리스트</h3>
+    <!-- 실시간 사용자 목록 -->
+    <ul id="user-list" class="space-y-2"></ul>
+  </div>
+{% endif %}
+
+  <!-- 2열 레이아웃: 채팅 + 이미지 -->
   <div class="grid md:grid-cols-2 gap-6">
-    <!-- 왼쪽: 채팅 영역 -->
+    <!-- 왼쪽: 채팅 -->
     <div class="bg-white border rounded-xl p-4 flex flex-col h-[70vh]">
-      <h2 class="font-semibold mb-2">채팅 영역(실시간)</h2>
-      <!-- 채팅 로그: 스크롤 되는 박스 -->
-      <div id="chat-log" class="flex-1 overflow-y-auto space-y-2 border rounded p-3 bg-gray-50"><!-- 메시지가 여기 쌓임 --></div>
-      <!-- 채팅 입력 폼 -->
+      <h2 class="font-semibold mb-2">채팅</h2>
+      <div id="chat-log" class="flex-1 overflow-y-auto space-y-2 border rounded p-3 bg-gray-50"></div>
       <form id="chat-form" class="mt-3 flex gap-2">
         <input id="chat-input" type="text" class="flex-1 border rounded px-3 py-2" placeholder="메시지를 입력하세요" />
         <button class="px-3 py-2 border rounded">전송</button>
       </form>
     </div>
 
-    <!-- 오른쪽: 이미지 업로드/그리드 -->
+    <!-- 오른쪽: 이미지 업로드 -->
     <div class="bg-white border rounded-xl p-4 flex flex-col h-[70vh]">
-      <h2 class="font-semibold mb-2">이미지 영역</h2>
-      <!-- 업로드 폼: multiple 허용 -->
+      <h2 class="font-semibold mb-2">이미지</h2>
       <form id="upload-form" class="mb-3 flex items-center gap-2">
         <input id="image-input" type="file" accept="image/*" multiple class="border rounded px-2 py-1" />
         <button class="px-3 py-2 border rounded">업로드</button>
       </form>
-      <!-- 이미지 카드들이 그리드로 나열 -->
       <div id="image-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto"></div>
     </div>
   </div>
 
+
   <script>
-  (function () {
-    // ───────────────────── 기본 값/DOM 참조 ─────────────────────
-    const slug = "{{ room.slug }}";                                                   // 방 식별자
-    const scheme = (location.protocol === "https:") ? "wss" : "ws";                   // ws/wss 결정
-    const wsUrl = `${scheme}://${location.host}/ws/rooms/${encodeURIComponent(slug)}/`; // 컨슈머 라우트
-    const csrftoken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || ""; // CSRF 재사용
+    (function () {
+    const slug = "{{ room.slug }}";
+    const scheme = (location.protocol === "https:") ? "wss" : "ws";
+    const wsUrl = `${scheme}://${window.location.host}/ws/rooms/${slug}/`;
+    const csrftoken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
+    const HOME_URL = "{% url 'home' %}";
+    
+    //  내 정보 & 방장 여부
+    const ME_ID = {{ request.user.id|default:"null" }};
+    const OWNER_ID = {{ room.created_by_id|default:"null" }};
+    const I_AM_OWNER = (ME_ID !== null && OWNER_ID !== null && ME_ID === OWNER_ID);
 
-    const $log = document.getElementById('chat-log');          // 채팅 로그 컨테이너
-    const $chatForm = document.getElementById('chat-form');    // 채팅 폼
-    const $chatInput = document.getElementById('chat-input');  // 채팅 입력창
-    const $uploadForm = document.getElementById('upload-form');// 업로드 폼
-    const $imageInput = document.getElementById('image-input');// 파일 입력
-    const $imageGrid = document.getElementById('image-grid');  // 이미지 그리드
+    const $log = document.getElementById('chat-log');
+    const $chatForm = document.getElementById('chat-form');
+    const $chatInput = document.getElementById('chat-input');
+    const $uploadForm = document.getElementById('upload-form');
+    const $imageInput = document.getElementById('image-input');
+    const $imageGrid = document.getElementById('image-grid');
+    const $userList = document.getElementById('user-list'); // 관리자 도구 사용자 목록
 
-    // ───────────────────── 도우미: 엘리먼트 생성 ─────────────────────
-    function el(tag, attrs = {}, ...children) {                 // 태그/속성/자식으로 DOM 생성
+    // 수정하기 관련 요소
+    const editBtn   = document.getElementById('btn-room-edit');         // 수정하기 버튼
+    const deleteBtn = document.getElementById('btn-room-delete');       // 방 삭제 버튼
+    const panel     = document.getElementById('room-edit-panel');       // 수정 패널
+    const saveBtn   = document.getElementById('btn-room-save');         // 저장
+    const cancelBtn = document.getElementById('btn-room-cancel');       // 취소
+    const errEl     = document.getElementById('edit-error');            // 오류 표시
+
+    const nameInput = document.getElementById('edit-name');             // 제목 입력
+    const topicInput= document.getElementById('edit-topic');            // 주제 입력
+    const pwInput   = document.getElementById('edit-password');         // 비밀번호 입력
+    const capInput  = document.getElementById('edit-capacity');         //
+
+    if (editBtn) {
+      editBtn.addEventListener('click', () => {
+        panel.classList.remove('hidden');
+        errEl.classList.add('hidden');
+      });
+    }
+    if (cancelBtn && panel) {
+      cancelBtn.addEventListener('click', () => {
+        panel.classList.add('hidden');                                  // 닫기
+        errEl && errEl.classList.add('hidden');
+      });
+    }
+
+    // 저장: DRF PATCH /api/rooms/{slug}/  (모델에서 권한/유효성 검사)
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const payload = {
+          name: (nameInput?.value ?? '').trim(),                        // 서버에서 Romname으로 반영
+          topic: (topicInput?.value ?? '').trim(),
+          password: (pwInput?.value ?? ''),                             // 빈문자면 해제
+          capacity: capInput?.value ? Number(capInput.value) : undefined,
+        };
+        // 빈 값은 제외해서 전송
+        Object.keys(payload).forEach(k => (payload[k] === '' || payload[k] === undefined) && delete payload[k]);
+
+        try {
+          console.log("123:",slug)
+          const res = await fetch(`/rooms/${slug}/update/`, {
+            method: 'POST', 
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': csrftoken,
+            },
+            body: JSON.stringify(payload),
+            credentials: 'same-origin',
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            // 400/403 등 오류 토스트
+            window.showToast?.('error', data.detail || data.error || '수정에 실패했습니다.');
+            errEl && (errEl.textContent = (data.detail || data.error || '수정에 실패했습니다.'), errEl.classList.remove('hidden'));
+            return;
+          }
+          // 성공: 서버가 room.updated를 브로드캐스트 → WS에서 제목/주제 갱신됨
+          window.showToast?.('success', '저장되었습니다.');
+          panel.classList.add('hidden');
+        } catch (e) {
+          window.showToast?.('error', '네트워크 오류로 저장에 실패했습니다.');
+          errEl && (errEl.textContent = '네트워크 오류로 저장에 실패했습니다.', errEl.classList.remove('hidden'));
+        }
+      });
+    }
+
+    // 삭제: DRF DELETE /api/rooms/{slug}/  (모델 delete_room에서 room.deleted 브로드캐스트)
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('정말 이 방을 삭제할까요? 이 작업은 되돌릴 수 없습니다.')) return;
+        try {
+          const res = await fetch(`/rooms/${slug}/delete/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrftoken },
+            credentials: 'same-origin',
+          });
+          if (!res.ok && res.status !== 204) {
+            window.showToast?.('error', '삭제에 실패했습니다.');
+            return;
+          }
+          // HTTP 삭제가 성공했어도 실사용자들은 WS room.deleted를 받아 자동 퇴장됨.
+          // 혹시 소켓이 연결되기 전이라면 직접 리다이렉트
+          try {
+            localStorage.setItem('last_toast', JSON.stringify({ level:'warning', text:'방이 삭제되었습니다.' }));
+          } catch {}
+          window.location.href = "{{ request.build_absolute_uri|slice:'://'}}{% url 'home' %}".replace(window.location.origin, ""); // 홈으로
+        } catch {
+          window.showToast?.('error', '네트워크 오류로 삭제에 실패했습니다.');
+        }
+      });
+    }
+
+    // ✅ 클라 상태(버전/유저 맵)
+    const state = {
+      version: 0,                  // 가장 최근 스냅샷/이벤트의 버전
+      users: new Map(),            // key: user_id, value: { user_id, username, is_owner }
+    };
+
+
+    function el(tag, attrs = {}, ...children) {
       const n = document.createElement(tag);
-      Object.entries(attrs).forEach(([k, v]) => (v != null) && n.setAttribute(k, v));
+      Object.entries(attrs).forEach(([k, v]) => v != null && n.setAttribute(k, v));
       children.forEach(c => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
       return n;
     }
 
-    // ───────────────────── 채팅 DOM 추가 ─────────────────────
-    function appendChat({user, message, ts}) {                  // 채팅 한 줄 추가
+    // 사용자 1명 렌더/갱신
+    function renderUserItem(user) {
+      const id = `user-${user.user_id}`;
+      const label = user.username + (user.is_owner ? " (방장)" : "");
+      const row = el("li", { id, class: "flex items-center justify-between border p-2 rounded" },
+        el("span", {}, label)
+      );
+
+      // ✅ 내가 방장이고, 상대가 나 자신이 아닐 때만 강퇴 버튼 노출
+      if (I_AM_OWNER && user.user_id !== ME_ID) {
+        const kickBtn = el("button", { class: "px-2 py-1 text-sm border rounded text-red-600" }, "강퇴");
+        kickBtn.addEventListener("click", async () => {
+          if (!confirm(`${user.username} 님을 강퇴할까요?`)) return;
+          const url = `{% url 'api_kick' room.slug 0 %}`.replace('/0/', `/${user.user_id}/`);
+          const res = await fetch(url, { method: "POST", headers: { "X-CSRFToken": csrftoken } });
+          let data = {};
+          try { data = await res.json(); } catch {}
+          console.log("강퇴 응답:", res.ok, data.message, data.error);
+          if (res.ok) {
+            showToast?.('success', data.message || `${user.username} 님을 강퇴했습니다.`);
+            // 서버가 user_left를 브로드캐스트하므로 DOM은 자동 반영됨
+          } else {
+            showToast?.('error', (data && data.error) ? data.error : '권한이 없거나 실패했습니다.');
+          }
+        });
+        row.appendChild(kickBtn);
+      }
+
+      const old = document.getElementById(id);
+      if (old) old.replaceWith(row); else $userList.appendChild(row);
+    }
+
+    // 사용자 제거
+    function removeUserItem(userId) {
+      const li = document.getElementById(`user-${userId}`);
+      if (li) li.remove();
+    }
+
+    // 스냅샷 반영(정답 상태로 동기화)
+    function reconcileUsersFromSnapshot(snapshot) {
+      // (1) 버전 검사: 오래된 스냅샷이면 무시
+      if (typeof snapshot.version === "number" && snapshot.version < state.version) return;
+      if (typeof snapshot.version === "number") state.version = snapshot.version;
+
+      // (2) 목록 기준으로 Diff
+      const incoming = snapshot.members || snapshot.users || [];
+      const incomingIds = new Set(incoming.map(u => u.user_id));
+
+      // 추가/갱신
+      for (const u of incoming) {
+        const prev = state.users.get(u.user_id);
+        if (!prev || prev.username !== u.username || prev.is_owner !== u.is_owner) {
+          state.users.set(u.user_id, { ...u });
+          renderUserItem(u);
+        }
+      }
+      // 제거
+      for (const id of Array.from(state.users.keys())) {
+        if (!incomingIds.has(id)) {
+          state.users.delete(id);
+          removeUserItem(id);
+        }
+      }
+    }
+
+    // 델타: join/left
+    function handleJoined(ev) {
+      if (typeof ev.version === "number" && ev.version < state.version) return;
+      if (typeof ev.version === "number") state.version = ev.version;
+      const u = { user_id: ev.user_id, username: ev.username, is_owner: !!ev.is_owner };
+      state.users.set(u.user_id, u);
+      renderUserItem(u);
+    }
+    function handleLeft(ev) {
+      if (typeof ev.version === "number" && ev.version < state.version) return;
+      if (typeof ev.version === "number") state.version = ev.version;
+      state.users.delete(ev.user_id);
+      removeUserItem(ev.user_id);
+    }
+
+    function appendChat({user, message, ts}) {
       const time = new Date(ts).toLocaleTimeString();
       const row = el('div', {class: 'text-sm'},
         el('span', {class: 'font-medium'}, user), document.createTextNode(' : '),
@@ -109,105 +316,125 @@
         el('span', {class: 'text-[11px] text-gray-500 ml-2'}, time)
       );
       $log.appendChild(row);
-      $log.scrollTop = $log.scrollHeight;                       // 새 메시지에 스크롤 맞춤
+      $log.scrollTop = $log.scrollHeight;
     }
 
-    // ───────────────────── 이미지 카드 DOM 추가 ─────────────────────
     function appendImage({id, user, image_url, ts}) {
       const time = new Date(ts).toLocaleString();
       const img = el('img', {src: image_url, class: 'w-full h-32 object-cover rounded'});
       const dl  = el('a', {href: image_url, download: '', class: 'text-xs underline'}, '다운로드');
       const del = el('button', {class: 'text-xs text-red-600 underline'}, '삭제');
-
-      const header = el('div', {class: 'flex items-center justify-between text-xs mb-1'},
-        el('span', {class: 'text-gray-600'}, user),
-        el('span', {class: 'text-gray-400'}, time)
+      const card = el('div', {class: 'border rounded p-2 bg-gray-50'},
+        el('div', {class: 'flex items-center justify-between text-xs mb-1'},
+          el('span', {class: 'text-gray-600'}, user),
+          el('span', {class: 'text-gray-400'}, time)
+        ),
+        img,
+        el('div', {class: 'flex items-center justify-between mt-1'}, dl, del)
       );
-      const actions = el('div', {class: 'flex items-center justify-between mt-1'}, dl, del);
-      const card = el('div', {class: 'border rounded p-2 bg-gray-50'}, header, img, actions);
-
-      // 삭제 버튼: 업로더 또는 방장만 서버에서 허용
       del.addEventListener('click', async (e) => {
         e.preventDefault();
         if (!confirm('정말 삭제할까요?')) return;
-        const url = `{% url 'api_image_delete' room.slug 0 %}`.replace('/0/', `/${id}/`); // URL 템플릿을 id로 치환
+        const url = `{% url 'api_image_delete' room.slug 0 %}`.replace('/0/', `/${id}/`);
         const res = await fetch(url, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
-        const data = await res.json().catch(()=>({}));
-        if (res.ok) card.remove(); else alert(data.error || '삭제 실패');
+        if (res.ok) card.remove();
       });
-
-      $imageGrid.prepend(card);                                  // 최신이 위로 오도록 prepend
+      $imageGrid.prepend(card);
     }
 
-    // ───────────────────── 초기 로딩(최근 메시지 50개) ─────────────────────
-    (async function initLoad() {
-      try {
-        const res = await fetch(`{% url 'api_messages_list' room.slug %}`); // GET 목록
-        const data = await res.json();
-        if (data.ok && Array.isArray(data.results)) {
-          // 최신이 먼저 오도록 구현된 경우 시간순으로 보이게 reverse 후 append
-          [...data.results].reverse().forEach(m => {
-            if (m.image_url) appendImage({id: m.id, user: m.user, image_url: m.image_url, ts: m.ts});
-            else if (m.content) appendChat({user: m.user, message: m.content, ts: m.ts});
-          });
-        }
-      } catch {}
-    })();
-
-    // ───────────────────── 이미지 업로드(다중) ─────────────────────
-    $uploadForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const files = $imageInput.files;
-      if (!files || files.length === 0) return;                  // 파일 없으면 스킵
-
-      const fd = new FormData();
-      for (const f of files) fd.append('images', f);             // 다중 파일을 동일 키에 append
-      const res = await fetch(`{% url 'api_image_upload' room.slug %}`, {
-        method: 'POST',
-        headers: { 'X-CSRFToken': csrftoken },                   // CSRF 헤더
-        body: fd,                                                // 멀티파트 업로드
-      });
-      if (res.ok) { $imageInput.value = ''; }                    // 성공 시 입력 초기화
-      else {
-        const data = await res.json().catch(()=>({}));
-        alert(data.error || '업로드 실패');
-      }
-    });
-
-    // ───────────────────── WebSocket 연결 및 이벤트 처리 ─────────────────────
     let socket;
     function connect() {
-      socket = new WebSocket(wsUrl);                             // 컨슈머에 연결
+      socket = new WebSocket(wsUrl);
       socket.onmessage = (e) => {
         try {
-          const data = JSON.parse(e.data);                       // 서버 → 클라 이벤트
-          if (data.event === "kicked") {
-            alert(data.msg || "강퇴되었습니다.");
-            location.replace("/?kicked=1");
-          } else if (data.event === "room_closed") {
-            alert(data.msg || "방이 삭제되었습니다.");
-            location.replace("/");
-          } else if (data.event === "chat") {
-            appendChat({user: data.user, message: data.message, ts: data.ts});
-          } else if (data.event === "image") {
-            appendImage({id: data.message_id, user: data.user, image_url: data.image_url, ts: data.ts});
+          let data; try { data = JSON.parse(e.data); } catch { return; }
+          console.log("WS 메시지 수신:", data);
+          switch (data.event) {
+            case "presence_snapshot": reconcileUsersFromSnapshot(data); break;
+            //아직 정원, 비공개 변경 이벤트 없음, 비밀번호 변경 추가해야됨
+            case "room.updated":
+              if (data.name) document.getElementById('room-title').textContent = data.name;
+              if (data.topic) document.getElementById('room-topic').textContent = `주제: ${data.topic}`;
+              break;
+            case "room.deleted":
+              try{
+                localStorage.setItem('last_toast', JSON.stringify({
+                  level:'warning', text: data.msg || '방장이 방을 삭제되었습니다.'
+                }));
+              } catch {}
+              try { socket.close(4404); } catch {}
+              break;
+            case "chat": appendChat({user: data.user, message: data.message, ts: data.ts}); break;
+            case "image": appendImage({id: data.message_id, user: data.user, image_url: data.image_url, ts: data.ts}); break;
+            case "user_joined": handleJoined(data); break;
+            case "user_left": handleLeft(data); break;
+            case "kicked": 
+              try{
+                localStorage.setItem('last_toast', JSON.stringify({level:'error', text: data.msg || '강퇴되었습니다.'}));
+              } catch {}
+              try { socket.close(4403); } catch {}
+              break;
+            case "room_closed": 
+              try{
+                localStorage.setItem('last_toast', JSON.stringify({
+                  level:'warning', text: data.msg || '방이 삭제되었습니다.'
+                }));
+              } catch {}
+              try { socket.close(4404); } catch {}
+              break;;
+            // 나머지 이벤트 처리
           }
         } catch {}
       };
       socket.onclose = (e) => {
-        if (![4403, 4404].includes(e.code)) setTimeout(connect, 1000); // 권한/방삭제가 아니면 재연결
+        const no_enter =[4000,4001,4403,4404]; // 4000: 명시적 나가기, 4001: 비로그인, 4403: 강퇴, 4404: 방 종료
+        if (no_enter.includes(e.code)) {
+          window.location.href = HOME_URL;
+          return;
+        }
+        setTimeout(connect, 1000);
       };
     }
+
     connect();
 
-    // ───────────────────── 채팅 전송(WebSocket) ─────────────────────
     $chatForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = ($chatInput.value || '').trim();
-      if (!text || !socket || socket.readyState !== 1) return;   // 빈 문자열/미연결이면 무시
-      socket.send(JSON.stringify({ action: 'chat', message: text })); // 서버에 chat 액션
-      $chatInput.value = '';                                     // 입력창 비우기
+      if (!text || !socket || socket.readyState !== 1) return;
+      socket.send(JSON.stringify({ action: 'chat', message: text }));
+      $chatInput.value = '';
+    });
+
+    $uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const files = $imageInput.files;
+      if (!files?.length) return;
+      const fd = new FormData();
+      for (const f of files) fd.append('images', f);
+      const res = await fetch(`{% url 'api_image_upload' room.slug %}`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken },
+        body: fd,
+      });
+      if (res.ok) $imageInput.value = '';
     });
   })();
+  // 메시지 표시 함수 (토스트)
+  function showToast(level, text) {
+    const area = document.getElementById('toast-area');
+    if (!area) return;
+    const cl = level === 'success' ? 'is-ok' : level === 'warning' ? 'is-warn' : level === 'error' ? 'is-bad' : 'is-info';
+    const icon = level === 'success' ? '✅' : level === 'warning' ? '⚠️' : level === 'error' ? '⛔' : 'ℹ️';
+    const div = document.createElement('div');
+    div.className = `toast__item ${cl}`;
+    div.setAttribute('role','alert');
+    div.innerHTML = `<span class="toast__icon">${icon}</span>
+                    <div class="toast__msg">${text}</div>
+                    <button type="button" class="toast__close" onclick="this.parentElement.remove()">✕</button>`;
+    area.appendChild(div);
+  }
+
+
   </script>
 {% endblock %}

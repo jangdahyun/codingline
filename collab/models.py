@@ -1,10 +1,14 @@
 # models.py
+from ast import Not
+from calendar import c
+from operator import ge
+from tkinter import E
 from django.db import models, transaction             # ORM + 트랜잭션
 from django.conf import settings                      # AUTH_USER_MODEL 참조
 from django.utils.text import slugify                 # 한글/공백 → 슬러그
 from django.utils import timezone                     # 시간 기록
 from django.core.exceptions import PermissionDenied,ValidationError  # 권한 예외 (403로 매핑 쉬움)
-from django.db.models import Q, F, Value, BigIntegerField, Case, When 
+from django.contrib.auth.models import AnonymousUser  # 로그인 확인
 
 ROLE_OWNER = "owner"
 ROLE_MEMBER = "member"                     # 조건부 UniqueConstraint에 필요
@@ -72,11 +76,144 @@ class Room(models.Model):
     # (뷰/컨슈머에서 room.메서드() 형태로 호출 → 가독성/응집도 ↑)
     # ──────────────────────────────────────────────────────────────
 
+    @transaction.atomic
+    def room_update(self, *, actor, name: None, topic: None, is_private: None, capacity: None, password:None,broadcast=True):
+        if actor.pk != self.created_by_id and not getattr(actor, "is_staff", False):
+            raise PermissionDenied("권한이 없습니다.")
+        if name is not None:
+            v=name.strip()
+            if not v:
+                raise ValidationError("방 제목은 비울 수 없습니다.")
+            self.Romname = v[:100]
+
+        if topic is not None:
+            self.topic = topic.strip()[:50]
+
+        if is_private is not None:
+            self.is_private = bool(is_private)
+
+        if capacity is not None:
+            if capacity < 1:
+                raise ValidationError("정원은 1명 이상이어야 합니다.")
+            if capacity > 10:
+                raise ValidationError("정원은 최대 10명입니다.")
+            self.capacity = capacity    
+        
+        if password is not None:
+            self.password = (password or "").strip()
+
+        self.save()
+
+        if broadcast:
+            try:
+                from channels.layers import get_channel_layer
+                from asgiref.sync import async_to_sync
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"room_{self.id}",
+                    {
+                        "type": "room.event",     # 컨슈머의 핸들러 이름
+                        "event": "room.updated",  # 프론트에서 분기 처리
+                        "payload": {
+                            "slug": self.slug,
+                            "name": self.Romname,
+                            "topic": self.topic,
+                            "is_private": self.is_private,
+                            "capacity": self.capacity,
+                            "requires_password": self.requires_password,
+                        },
+                    },
+                )
+            except Exception:
+                # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 갱신 자체는 계속 진행
+                pass
+
+            def _lobby_updated():
+                try:
+                    from channels.layers import get_channel_layer
+                    from asgiref.sync import async_to_sync
+                    channel_layer = get_channel_layer()
+                    async_to_sync(channel_layer.group_send)(
+                        "lobby",   # 로비 그룹
+                        {
+                            "type": "lobby.event",  # 컨슈머의 핸들러 이름
+                              # 프론트에서 분기 처리
+                            "payload": {
+                                "event": "room_updated",
+                                "slug": self.slug,
+                                "name": self.Romname,
+                                "topic": self.topic,
+                                "is_private": self.is_private,
+                                "capacity": self.capacity,
+                                "requires_password": self.requires_password,
+                            },
+                        },
+                    )
+                except Exception:
+                    pass  # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 무시
+            transaction.on_commit(_lobby_updated)
+        return self
+    
+    @transaction.atomic
+    def room_delete(self, *, actor, broadcast=True):
+        if actor.pk != self.created_by_id and not getattr(actor, "is_staff", False):
+            raise PermissionDenied("권한이 없습니다.")
+        # 관련 멤버십/메시지 등도 모두 삭제됨(CASCADE)
+
+        room_slug = self.slug 
+        room_name = self.Romname
+        if broadcast:
+            try:
+                from channels.layers import get_channel_layer
+                from asgiref.sync import async_to_sync
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"room_{self.id}",
+                    {
+                        "type": "room.event",     # 컨슈머의 핸들러 이름
+                        "event": "room.deleted",  # 프론트에서 분기 처리
+                        "payload": {
+                            "slug": room_slug,
+                            "name": room_name,
+                        },
+                    },
+                )
+            except Exception:
+                # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 삭제 자체는 계속 진행
+                pass
+            def _lobby_deleted():
+                try:
+                    from channels.layers import get_channel_layer
+                    from asgiref.sync import async_to_sync
+                    channel_layer = get_channel_layer()
+                    async_to_sync(channel_layer.group_send)(
+                        "lobby",   # 로비 그룹
+                        {
+                            "type": "lobby.event",  # 컨슈머의 핸들러 이름
+                              # 프론트에서 분기 처리
+                            "payload": {
+                                "event": "room_deleted",
+                                "slug": room_slug,
+                                "name": room_name,
+                            },
+                        },
+                    )
+                except Exception:
+                    pass  # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 무시
+            transaction.on_commit(_lobby_deleted)
+
+        super(Room, self).delete()
+        return {"slug": room_slug, "name": room_name}
+
     # 입장 가능 여부 + 사유
     def can_enter(self, user) -> tuple[bool, str | None]:
+        if not user or isinstance(user, AnonymousUser):
+            return False, "로그인이 필요합니다."
+        
         # 밴(강퇴) 여부 먼저 체크
         if RoomMember.objects.filter(room=self, user=user, is_banned=True).exists():
             return False, "강퇴된 사용자입니다."
+        
         # 방장이 아니면 정원 체크
         if user.pk != self.created_by_id:
             current = RoomMember.objects.filter(
@@ -88,31 +225,49 @@ class Room(models.Model):
 
     # 방장 권한을 “가장 먼저 들어온 멤버”에게 위임
     @transaction.atomic
-    def transfer_ownership_to_earliest(self):
-        nxt = (
-            RoomMember.objects
+    def transfer_ownership_to_earliest(self, *, demote_previous: bool = True):
+        # 1) Room 행 잠금
+        room = type(self).objects.select_for_update().get(pk=self.pk)
+
+        prev_owner_id = room.created_by_id
+
+        # 2) 현재 방장 멤버십 잠금 + 존재/역할 재확인
+        prev_owner_mem = (RoomMember.objects
             .select_for_update()
-            .filter(room=self, is_banned=False)
-            .exclude(user_id=self.created_by_id)
-            .order_by("joined_at")
-            .first()
-        )
+            .filter(room=room, user_id=prev_owner_id, role=RoomMember.ROLE_OWNER)
+            .first())
+        print("이전 방장 멤버십:", prev_owner_mem)
+
+        # 3) 다음 방장 후보 선별(본인 제외, 활성/남아있는 순서 기준은 프로젝트 규칙에 맞게)
+        nxt = (RoomMember.objects
+            .select_for_update()
+            .filter(room=room)
+            .exclude(user_id=prev_owner_id)
+            .exclude(is_banned=True) # 밴된 사람 제외
+            .order_by("joined_at", "id")    # 규칙에 맞게 정렬
+            .first())
+
         if not nxt:
-            return None
-        # 기존 방장 → 멤버
-        (RoomMember.objects
-         .select_for_update()
-         .filter(room=self, user_id=self.created_by_id)
-         .update(role=RoomMember.ROLE_MEMBER))
-        # 새 방장 지정
-        (RoomMember.objects
-         .select_for_update()
-         .filter(pk=nxt.pk)
-         .update(role=RoomMember.ROLE_OWNER))
-        # Room.created_by 갱신
-        self.created_by_id = nxt.user_id
-        self.save(update_fields=["created_by"])
-        return nxt.user
+            return None  # 넘길 대상 없으면 종료
+
+        # 4) 이전 방장 강등은 '남아 있는 연결이 확실'할 때만 수행
+        if demote_previous and prev_owner_mem is not None:
+            # open_conn 필드가 있다면 안전하게 조건 재확인
+            if getattr(prev_owner_mem, "open_conn", 0) > 0:
+                prev_owner_mem.role = RoomMember.ROLE_MEMBER
+                prev_owner_mem.save(update_fields=["role"])
+            # 연결이 0이면 강등하지 않음(곧 멤버십이 정리될 상황)
+
+        # 5) 소유권 이전
+        room.created_by_id = nxt.user_id
+        room.save(update_fields=["created_by"])
+
+        # 6) 새 방장 승격
+        if nxt.role != RoomMember.ROLE_OWNER:
+            nxt.role = RoomMember.ROLE_OWNER
+            nxt.save(update_fields=["role"])
+
+        return nxt
 
     # 강퇴(방장만, 방장은 강퇴 불가)
     @transaction.atomic
@@ -125,10 +280,13 @@ class Room(models.Model):
         )
         # 권한: 방장만
         if actor_mem.role != RoomMember.ROLE_OWNER:
+            print("권한 없음")
             raise PermissionDenied("권한이 없습니다.")
         # 대상이 방장인지
         if target_user.pk == self.created_by_id:
+            print("방장은 강퇴 불가")
             raise PermissionDenied("방장은 강퇴할 수 없습니다.")
+            
         # 대상 멤버십 확보(+락)
         target_mem, _ = (
             RoomMember.objects
@@ -142,6 +300,7 @@ class Room(models.Model):
         # 밴 플래그 ON
         target_mem.is_banned = True
         target_mem.save(update_fields=["is_banned"])
+        print("강퇴 성공")
         return True
 
     # 밴 해제(방장만)
@@ -160,6 +319,7 @@ class Room(models.Model):
             .update(is_banned=False)
         )
         return bool(updated)
+    
 
 # ──────────────────────────────────────────────────────────────────────
 # 방 멤버십 (RoomMember)

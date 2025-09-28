@@ -1,49 +1,83 @@
+{% load static %}
 <!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}CodingLine{% endblock %}</title>
-  <!-- 개발용: Tailwind CDN (운영은 정적 빌드 권장) -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="{% static 'css/codingline.css' %}">
 </head>
-<body class="bg-gray-50 text-gray-900">
-  <!-- 상단 네비 -->
-  <nav class="bg-white border-b">
-    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-      <a href="{% url 'home' %}" class="font-bold text-lg">CodingLine</a>
-      <div class="flex items-center gap-4">
-        <form action="{% url 'home' %}" method="get" class="hidden md:block">
-          <input name="q" value="{{ q }}" placeholder="방 검색"
-                 class="border rounded px-3 py-1 w-64" />
+<body class="page">
+  <!-- 상단 네비게이션 -->
+  <nav class="nav">
+    <div class="container nav__inner">
+      <a href="{% url 'home' %}" class="brand">CodingLine</a>
+
+      <div class="nav__right">
+        <form action="{% url 'home' %}" method="get" class="search search--desktop">
+          <input name="q" value="{{ q }}" placeholder="방 검색" class="search__input" />
         </form>
+
         {% if request.user.is_authenticated %}
-          <span class="text-sm">안녕하세요, {{ request.user.username }}님</span>
-          <a class="text-blue-600" href="{% url 'account_logout' %}">로그아웃</a>
+          <span class="nav__greet">안녕하세요, {{ request.user.username }}님</span>
+          <a class="link" href="{% url 'account_logout' %}">로그아웃</a>
         {% else %}
-          <a class="text-blue-600" href="{% url 'account_login' %}">로그인</a>
-          <a class="text-blue-600" href="{% url 'account_signup' %}">회원가입</a>
+          <a class="link" href="{% url 'account_login' %}">로그인</a>
+          <a class="link" href="{% url 'account_signup' %}">회원가입</a>
         {% endif %}
       </div>
     </div>
   </nav>
 
-  <!-- Django messages -->
-  <div class="max-w-5xl mx-auto px-4 mt-4">
-    {% for m in messages %}
-      <div class="mb-2 rounded px-4 py-2
-                  {% if m.tags == 'success' %}bg-green-100 text-green-800
-                  {% elif m.tags == 'error' %}bg-red-100 text-red-800
-                  {% else %}bg-gray-100{% endif %}">
-        {{ m }}
-      </div>
-    {% endfor %}
-  </div>
+  <!-- 메시지(토스트) -->
+  <div id="toast-area" class="container toast"></div>
 
-  <!-- 페이지 내용 -->
-  <main class="max-w-5xl mx-auto px-4 py-6">
+  <!-- 본문 -->
+  <main class="container main">
     {% block content %}{% endblock %}
   </main>
+
+  <!-- (기존) 인증 웹소켓 스크립트 유지 -->
+  <script>
+    (function(){
+      var isAuth = {{ request.user.is_authenticated|yesno:"true,false" }};
+      if (!isAuth) return;
+      if (window.__authWS) { try { window.__authWS.close(); } catch(e){} }
+      var protocol = (location.protocol === "https:") ? "wss" : "ws";
+      var url = protocol + "://" + location.host + "/ws/auth/";
+      var ws = new WebSocket(url); window.__authWS = ws;
+      ws.onmessage = function(e){
+        try{
+          var data = JSON.parse(e.data);
+          if (data.event === "force_logout") {
+            (window.handleForceLogout || function(msg){
+              alert(msg || "다른 곳에서 로그인이 감지되어 로그아웃됩니다.");
+              window.location.href = "/accounts/logout/";
+            })(data.msg);
+          }
+        }catch(err){}
+      };
+    })();
+
+    // 전역 토스트
+    window.showToast = function(level, text) {
+      const area = document.getElementById('toast-area'); if (!area) return;
+      const cl = level === 'success' ? 'is-ok' : level === 'warning' ? 'is-warn' : level === 'error' ? 'is-bad' : 'is-info';
+      const icon = level === 'success' ? '✅' : level === 'warning' ? '⚠️' : level === 'error' ? '⛔' : 'ℹ️';
+      const div = document.createElement('div');
+      div.className = `toast__item ${cl}`;
+      div.setAttribute('role','alert');
+      div.innerHTML = `<span class="toast__icon">${icon}</span>
+                      <div class="toast__msg">${text}</div>
+                      <button type="button" class="toast__close" onclick="this.parentElement.remove()">✕</button>`;
+      area.appendChild(div);
+      setTimeout(()=>div.remove(), 4000);
+    };
+
+  
+
+  </script>
+
   {% block scripts %}{% endblock %}
 </body>
 </html>
