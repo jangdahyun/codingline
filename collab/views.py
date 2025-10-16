@@ -2,9 +2,8 @@
 # imports
 # ------------------------------------------------------------
 from __future__ import annotations
-from email.mime import application
-from math import log
-import re
+import time
+
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -21,7 +20,6 @@ from django.core.paginator import Paginator                                 # �
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from requests import post
 
 from .forms import RoomCreateForm
 from .models import Room, RoomMember, Message     
@@ -139,15 +137,51 @@ def room_enter_json(request, slug):
 
 @login_required
 def room_leave(request, slug):
-    """방 나가기: 방장 위임 → 내 멤버십 삭제 → '빈 방'이면 삭제"""
+    """방 나가기: 방장 위임 → 내 멤버십 삭제 → '빈 방'이면 삭제 (+ 실시간 브로드캐스트)"""
     room = get_object_or_404(Room, slug=slug)
+    user = request.user
+
+    # 삭제 후에도 식별할 값들 미리 보관
+    room_id = room.pk
+    room_slug = room.slug
+    group_room = f"room_{room_id}"
+
+    new_owner_payload = None
+    user_left_payload = None
+    room_closed_payloads = []  # [(group, message), ...]
 
     with transaction.atomic():
-        if _is_owner(request.user, room):
-            room.transfer_ownership_to_earliest()
+        # 1) 방장이라면 위임, 성공 시 owner_changed 알림 준비
+        if _is_owner(user, room):
+            new_owner = room.transfer_ownership_to_earliest()
+            if new_owner:
+                new_owner_payload = {
+                    "type": "room.event",
+                    "payload": {
+                        "event": "owner_changed",
+                        "room_id": room_id,
+                        "new_owner_id": new_owner.user_id,
+                        "new_owner_name": getattr(new_owner.user, "username", str(new_owner.user_id)),
+                        "version": int(time.time() * 1000),
+                    },
+                }
 
-        RoomMember.objects.filter(room=room, user=request.user).delete()
+        # 2) 내 멤버십 삭제
+        RoomMember.objects.filter(room=room, user=user).delete()
 
+        # 3) 나감 알림 준비
+        user_left_payload = {
+            "type": "room.event",
+            "payload": {
+                "event": "user_left",
+                "room_id": room_id,
+                "user_id": user.id,
+                "username": getattr(user, "username", str(user.id)),
+                "version": int(time.time() * 1000),
+            },
+        }
+
+        # 4) 방이 비었으면 방 삭제 + room_closed 알림 예약
         has_active = (
             RoomMember.objects.select_for_update()
             .filter(room=room, is_banned=False)
@@ -157,9 +191,28 @@ def room_leave(request, slug):
             room.delete()
             logger.info("방 삭제: (마지막 사람이 나감)")
             messages.info(request, "마지막 사람이어서 방이 삭제되었습니다.")
-            return redirect("home")
-    logger.info(f"방 나감: user={request.user.pk}, room={room.pk}")
+
+            room_closed_payloads.append((
+                group_room,
+                {"type": "room.closed", "msg": "방이 삭제되었습니다.", "slug": room_slug},
+            ))
+            room_closed_payloads.append((
+                "lobby",
+                {"type": "lobby.event",
+                 "payload": {"event": "room_closed", "room_id": room_id, "slug": room_slug}},
+            ))
+
+    # ── 트랜잭션 밖: 커밋 성공 후에만 브로드캐스트 ──
+    if new_owner_payload:
+        safe_group_send(group_room, new_owner_payload)
+    if user_left_payload:
+        safe_group_send(group_room, user_left_payload)
+    for g, msg in room_closed_payloads:
+        safe_group_send(g, msg)
+
+    logger.info("방 나감: user=%s, room=%s", user.pk, room_id)
     return redirect("home")
+
 
 
 @require_POST
@@ -358,9 +411,24 @@ def api_image_delete(request, slug, message_id: int):
     msg = get_object_or_404(Message, id=message_id, room=room)
     is_owner = (request.user.pk == room.created_by_id)
     if not (msg.user_id == request.user.pk or is_owner):
+        safe_group_send(
+            f"user_{request.user.pk}",   # 개인 그룹 (소비자에서 add/remove 처리 필요)
+            {
+                "type": "notify.event",
+                "payload": {
+                    "level": "error",
+                    "message": "삭제 권한이 없습니다.",
+                    "code": "forbidden",
+                    "ts": timezone.now().isoformat(),
+                },
+            },
+        )
         return JsonResponse({"ok": False, "error": "삭제 권한이 없습니다."}, status=403)
 
+    msg_id = msg.id
+    img_url = msg.image.url if msg.image else None
     image_path = msg.image.path if msg.image else None
+
     msg.delete()
 
     # 실제 파일 삭제(선택)
@@ -372,12 +440,24 @@ def api_image_delete(request, slug, message_id: int):
         except Exception:
             logger.warning("파일 삭제 실패: %s", image_path)
 
+    safe_group_send(
+        f"room_{room.pk}",
+        {
+            "type": "room.event",
+            "payload": {
+                "action": "image.deleted",
+                "message_id": msg_id,
+                "image_url": img_url,
+                "ts": timezone.now().isoformat(),
+            },
+        },
+    )
     return JsonResponse({"ok": True})
 
 @login_required
 @require_POST
 def api_room_update(request, slug):
-    """POST /api/rooms/<slug>/update/  Body: JSON{name,topic,is_private,capacity,password}"""
+    """POST /rooms/<slug>/update/  Body: JSON{name,topic,is_private,capacity,password}"""
     room = get_object_or_404(Room, slug=slug)
     import json
     try:
@@ -408,14 +488,52 @@ def api_room_update(request, slug):
     except ValidationError as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
 
-@login_required
+# @login_required
+# @require_POST
+# def api_room_delete(request, slug):
+#     """POST /rooms/<slug>/delete/"""
+#     room = get_object_or_404(Room, slug=slug)
+#     try:
+#         room.room_delete(actor=request.user, broadcast=True)
+#         return JsonResponse({"ok": True})
+#     except PermissionDenied as e:
+#         return JsonResponse({"ok": False, "error": str(e)}, status=403)
+
+
 @require_POST
+@login_required
 def api_room_delete(request, slug):
-    """POST /api/rooms/<slug>/delete/"""
+    """
+    방 삭제:
+    - 일반 폼 제출(HTML form) → 메시지 남기고 홈으로 redirect
+    - AJAX(fetch) 요청 → JSON 응답
+    """
     room = get_object_or_404(Room, slug=slug)
+
+    # 1) AJAX 호출인지 감지 (fetch, axios 등)
+    is_ajax = (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or "application/json" in (request.headers.get("Accept", "") or "")
+    )
+
     try:
+        # 2) 실제 삭제 도메인 로직 (권한 검사 + 브로드캐스트 포함)
         room.room_delete(actor=request.user, broadcast=True)
-        return JsonResponse({"ok": True})
+
     except PermissionDenied as e:
-        return JsonResponse({"ok": False, "error": str(e)}, status=403)
+        # 3) 권한 없음 분기
+        if is_ajax:
+            # AJAX면 JSON으로 에러 반환
+            return JsonResponse({"ok": False, "error": str(e)}, status=403)
+        # 폼 제출이면 메시지 남기고 원래 디테일로 돌려보냄
+        messages.error(request, str(e))
+        return redirect("room-detail", slug=slug)
+
+    # 4) 성공 응답 분기
+    if is_ajax:
+        # AJAX면 JSON
+        return JsonResponse({"ok": True})
+    # 폼 제출이면 메시지 + 홈으로 이동
+    messages.success(request, "방이 삭제되었습니다.")
+    return redirect("home")
 

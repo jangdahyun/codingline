@@ -1,440 +1,944 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{{ room.Romname }} · CodingLine{% endblock %}
-
 {% block content %}
-  
-  <h1 id="room-title" class="text-xl font-semibold mb-4">{{ room.Romname }}</h1>
-  <p id="room-topic" class="text-gray-600 mb-6">주제: {{ room.topic }}</p>
 
-  <!-- ✅ 방장만 보이는 액션 버튼 -->
-  {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
-    <div class="flex items-center gap-2 mb-4">
-      <!-- 수정 버튼: 기본 스타일과 유사하게 -->
-      <button id="btn-room-edit" class="px-3 py-2 rounded border">수정하기</button>
-      <!-- 삭제 버튼: 빨간 포커스 -->
-      <button id="btn-room-delete" class="px-3 py-2 rounded border text-red-600">방 삭제</button>
-    </div>
+<link rel="stylesheet" href="{% static 'css/room_detail2.css' %}">
 
-    <!-- ✅ 수정 패널(토글 표시) -->
-    <div id="room-edit-panel" class="bg-white border rounded-xl p-4 mb-4 hidden">
-      <h3 class="font-medium mb-3">방 정보 수정</h3>
+<h1 id="room-title" class="head__title">{{ room.Romname }}</h1>
+<p id="room-topic" class="head__desc">주제: {{ room.topic }}</p>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <!-- 이름 -->
-        <label class="flex flex-col">
-          <span class="text-sm text-gray-600 mb-1">방 제목</span>
-          <input id="edit-name" type="text" value="{{ room.Romname }}" class="border rounded px-3 py-2" />
-        </label>
-
-        <!-- 주제 -->
-        <label class="flex flex-col">
-          <span class="text-sm text-gray-600 mb-1">주제</span>
-          <input id="edit-topic" type="text" value="{{ room.topic }}" class="border rounded px-3 py-2" />
-        </label>
-
-        <!-- 비밀번호 -->
-        <label class="flex flex-col">
-          <span class="text-sm text-gray-600 mb-1">비밀번호(빈칸=해제)</span>
-          <input id="edit-password" type="text" value="{{ room.password }}" class="border rounded px-3 py-2" />
-        </label>
-
-        <!-- 정원 -->
-        <label class="flex flex-col">
-          <span class="text-sm text-gray-600 mb-1">정원(1~500)</span>
-          <input id="edit-capacity" type="number" min="1" max="500" value="{{ room.capacity }}" class="border rounded px-3 py-2" />
-        </label>
-      </div>
-
-      <div class="mt-3 flex items-center gap-2">
-        <button id="btn-room-save" class="px-3 py-2 rounded border">저장</button>
-        <button id="btn-room-cancel" class="px-3 py-2 rounded border">취소</button>
-        <span id="edit-error" class="text-sm text-red-600 ml-2 hidden">저장에 실패했습니다.</span>
-      </div>
-    </div>
-  {% endif %}
-
-  <!-- 방 나가기 버튼 -->
-  <form action="{% url 'room-leave' room.slug %}" method="post" class="mb-4">
+{% comment %} {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
+<div class="mb-3" style="display:flex; gap:8px; align-items:center;">
+  <button id="btn-room-edit" class="btn">수정하기</button>
+  <form method="post" action="{% url 'api-room-delete' room.slug %}"
+        onsubmit="return confirm('정말 이 방을 삭제할까요? 이 작업은 되돌릴 수 없습니다.');">
     {% csrf_token %}
-    <button class="px-3 py-2 rounded border">방 나가기</button>
+    <button type="submit" class="btn" style="color:#ff6b6b; border-color:#b4232a;">방 삭제</button>
   </form>
+</div> {% endcomment %}
+<div class="mb-3 owner-only" style="display:none; gap:8px; align-items:center;">
+  <button id="btn-room-edit" class="btn">수정하기</button>
+  <form method="post" action="{% url 'api-room-delete' room.slug %}"
+        onsubmit="return confirm('정말 이 방을 삭제할까요? 이 작업은 되돌릴 수 없습니다.');">
+    {% csrf_token %}
+    <button type="submit" class="btn" style="color:#ff6b6b; border-color:#b4232a;">방 삭제</button>
+  </form>
+</div>
 
-  <!-- 🔥 관리자(방장) 도구 -->
-  {% comment %} {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
-    <div class="bg-white border rounded-xl p-4 mb-4">
-      <h3 class="font-medium mb-2">관리자(방장) 도구</h3>
-      <!-- 실시간 사용자 목록 -->
-      <ul id="user-list" class="space-y-2"></ul>
-    </div>
-  {% endif %} {% endcomment %}
-
-<!-- 🔥 접속자 리스트 (모든 로그인 사용자에게 표시) -->
-{% if request.user.is_authenticated %}
-  <div class="bg-white border rounded-xl p-4 mb-4">
-    <h3 class="font-medium mb-2">접속자 리스트</h3>
-    <!-- 실시간 사용자 목록 -->
-    <ul id="user-list" class="space-y-2"></ul>
+<div id="room-edit-panel" class="card hidden owner-only" style="display:none;">
+  <h3 class="card__title">방 정보 수정</h3>
+  <div class="form" style="display:grid; gap:12px; grid-template-columns:repeat(2,minmax(0,1fr));">
+    <label class="field">
+      <span class="field__label">방 제목</span>
+      <input id="edit-name" type="text" value="{{ room.Romname }}" class="search__input" />
+    </label>
+    <label class="field">
+      <span class="field__label">주제</span>
+      <input id="edit-topic" type="text" value="{{ room.topic }}" class="search__input" />
+    </label>
+    <label class="field">
+      <span class="field__label">비밀번호(빈칸=해제)</span>
+      <input id="edit-password" type="text" value="{{ room.password }}" class="search__input" />
+    </label>
+    <label class="field">
+      <span class="field__label">정원(1~500)</span>
+      <input id="edit-capacity" type="number" min="1" max="500" value="{{ room.capacity }}" class="search__input" />
+    </label>
   </div>
-{% endif %}
-
-  <!-- 2열 레이아웃: 채팅 + 이미지 -->
-  <div class="grid md:grid-cols-2 gap-6">
-    <!-- 왼쪽: 채팅 -->
-    <div class="bg-white border rounded-xl p-4 flex flex-col h-[70vh]">
-      <h2 class="font-semibold mb-2">채팅</h2>
-      <div id="chat-log" class="flex-1 overflow-y-auto space-y-2 border rounded p-3 bg-gray-50"></div>
-      <form id="chat-form" class="mt-3 flex gap-2">
-        <input id="chat-input" type="text" class="flex-1 border rounded px-3 py-2" placeholder="메시지를 입력하세요" />
-        <button class="px-3 py-2 border rounded">전송</button>
-      </form>
-    </div>
-
-    <!-- 오른쪽: 이미지 업로드 -->
-    <div class="bg-white border rounded-xl p-4 flex flex-col h-[70vh]">
-      <h2 class="font-semibold mb-2">이미지</h2>
-      <form id="upload-form" class="mb-3 flex items-center gap-2">
-        <input id="image-input" type="file" accept="image/*" multiple class="border rounded px-2 py-1" />
-        <button class="px-3 py-2 border rounded">업로드</button>
-      </form>
-      <div id="image-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto"></div>
-    </div>
+  <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+    <button id="btn-room-save" class="btn">저장</button>
+    <button id="btn-room-cancel" class="btn">취소</button>
+    <span id="edit-error" class="muted hidden">저장에 실패했습니다.</span>
   </div>
+</div>
 
+<form id="room-leave" action="{% url 'room-leave' room.slug %}" method="post" class="mb-4">
+  {% csrf_token %}
+  <button class="btn" id="btn-leave">방 나가기</button>
+</form>
 
-  <script>
-    (function () {
-    const slug = "{{ room.slug }}";
-    const scheme = (location.protocol === "https:") ? "wss" : "ws";
-    const wsUrl = `${scheme}://${window.location.host}/ws/rooms/${slug}/`;
-    const csrftoken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
-    const HOME_URL = "{% url 'home' %}";
-    
-    //  내 정보 & 방장 여부
-    const ME_ID = {{ request.user.id|default:"null" }};
-    const OWNER_ID = {{ room.created_by_id|default:"null" }};
-    const I_AM_OWNER = (ME_ID !== null && OWNER_ID !== null && ME_ID === OWNER_ID);
+<div class="room-layout">
+  <!-- ⬅ 이미지 뷰어 -->
+  <section id="image-viewer" class="image-viewer">
+    <div id="image-empty" class="image-viewer__empty">아직 이미지가 없습니다.</div>
+    <img id="image-current" class="image-viewer__img" alt="uploaded image" />
+    <button id="image-prev" class="image-viewer__nav image-viewer__nav--prev">이전</button>
+    <button id="image-next" class="image-viewer__nav image-viewer__nav--next">다음</button>
+    <div id="image-indicator" class="image-viewer__ind">1 / 1</div>
 
-    const $log = document.getElementById('chat-log');
-    const $chatForm = document.getElementById('chat-form');
-    const $chatInput = document.getElementById('chat-input');
-    const $uploadForm = document.getElementById('upload-form');
-    const $imageInput = document.getElementById('image-input');
-    const $imageGrid = document.getElementById('image-grid');
-    const $userList = document.getElementById('user-list'); // 관리자 도구 사용자 목록
+    <!-- 🎨 드로잉 툴바 -->
+    <div id="draw-toolbar" class="draw__toolbar hidden">
+      <label class="draw__label">펜
+        <input type="color" id="pen-color" value="#111111" />
+      </label>
+      <label class="draw__label">굵기
+        <input type="range" id="pen-size" min="1" max="40" value="4" />
+      </label>
+      <button type="button" id="btn-draw-toggle" class="draw__btn">그리기 켜기</button>
+      <button type="button" id="btn-pen" class="draw__btn">펜</button>
+      <button type="button" id="btn-eraser" class="draw__btn">지우개</button>
+      <button type="button" id="btn-clear" class="draw__btn">지우기</button>
+      <button type="button" id="btn-download" class="draw__btn">다운로드</button>
+      <button type="button" id="btn-imgdelete" class="draw__btn">이미지삭제</button>
+    </div>
 
-    // 수정하기 관련 요소
-    const editBtn   = document.getElementById('btn-room-edit');         // 수정하기 버튼
-    const deleteBtn = document.getElementById('btn-room-delete');       // 방 삭제 버튼
-    const panel     = document.getElementById('room-edit-panel');       // 수정 패널
-    const saveBtn   = document.getElementById('btn-room-save');         // 저장
-    const cancelBtn = document.getElementById('btn-room-cancel');       // 취소
-    const errEl     = document.getElementById('edit-error');            // 오류 표시
+    <canvas id="draw-canvas" class="draw__canvas hidden"></canvas>
+  </section>
 
-    const nameInput = document.getElementById('edit-name');             // 제목 입력
-    const topicInput= document.getElementById('edit-topic');            // 주제 입력
-    const pwInput   = document.getElementById('edit-password');         // 비밀번호 입력
-    const capInput  = document.getElementById('edit-capacity');         //
+  <!-- ➡ 사이드바 -->
+  <aside class="sidebar">
+    <section class="card">
+      <h3 class="text-sm font-semibold" style="margin-bottom:8px;">접속자</h3>
+      <ul id="online-list" class="online__list"></ul>
+    </section>
 
-    if (editBtn) {
-      editBtn.addEventListener('click', () => {
-        panel.classList.remove('hidden');
-        errEl.classList.add('hidden');
-      });
-    }
-    if (cancelBtn && panel) {
-      cancelBtn.addEventListener('click', () => {
-        panel.classList.add('hidden');                                  // 닫기
-        errEl && errEl.classList.add('hidden');
-      });
-    }
+    {% comment %} {% if request.user.is_authenticated and request.user.pk == room.created_by_id %}
+    <section id="pending-panel" class="card">
+      <h3 class="text-sm font-semibold" style="margin-bottom:8px;">승인 대기 이미지</h3>
+      <ul id="pending-list" style="display:flex; flex-direction:column; gap:8px;"></ul>
+      <p id="pending-empty" class="muted">대기 항목이 없습니다.</p>
+    </section>
+    {% endif %} {% endcomment %}
+    <section id="pending-panel" class="card owner-only" style="display:none;">
+      <h3 class="text-sm font-semibold" style="margin-bottom:8px;">승인 대기 이미지</h3>
+      <ul id="pending-list" style="display:flex; flex-direction:column; gap:8px;"></ul>
+      <p id="pending-empty" class="muted">대기 항목이 없습니다.</p>
+    </section>
 
-    // 저장: DRF PATCH /api/rooms/{slug}/  (모델에서 권한/유효성 검사)
-    if (saveBtn) {
-      saveBtn.addEventListener('click', async () => {
-        const payload = {
-          name: (nameInput?.value ?? '').trim(),                        // 서버에서 Romname으로 반영
-          topic: (topicInput?.value ?? '').trim(),
-          password: (pwInput?.value ?? ''),                             // 빈문자면 해제
-          capacity: capInput?.value ? Number(capInput.value) : undefined,
-        };
-        // 빈 값은 제외해서 전송
-        Object.keys(payload).forEach(k => (payload[k] === '' || payload[k] === undefined) && delete payload[k]);
+    <section class="card chat">
+      <header class="chat__head">채팅</header>
+      <div id="chat-log" class="chat__log" data-page-loaded="0"></div>
+      <footer class="chat__foot">
+        <form id="chat-form" class="chat__form">
+          <input id="chat-input" type="text" class="chat__input" placeholder="메시지 입력…" />
+          <button class="chat__send">전송</button>
+        </form>
+      </footer>
+    </section>
 
-        try {
-          console.log("123:",slug)
-          const res = await fetch(`/rooms/${slug}/update/`, {
-            method: 'POST', 
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRFToken': csrftoken,
-            },
-            body: JSON.stringify(payload),
-            credentials: 'same-origin',
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            // 400/403 등 오류 토스트
-            window.showToast?.('error', data.detail || data.error || '수정에 실패했습니다.');
-            errEl && (errEl.textContent = (data.detail || data.error || '수정에 실패했습니다.'), errEl.classList.remove('hidden'));
-            return;
-          }
-          // 성공: 서버가 room.updated를 브로드캐스트 → WS에서 제목/주제 갱신됨
-          window.showToast?.('success', '저장되었습니다.');
-          panel.classList.add('hidden');
-        } catch (e) {
-          window.showToast?.('error', '네트워크 오류로 저장에 실패했습니다.');
-          errEl && (errEl.textContent = '네트워크 오류로 저장에 실패했습니다.', errEl.classList.remove('hidden'));
-        }
-      });
-    }
+    <section class="card">
+      <h3 class="text-sm font-semibold" style="margin-bottom:8px;">이미지 업로드</h3>
+      <form id="upload-form" class="upload__form">
+        <input id="image-input" type="file" accept="image/*" multiple class="upload__input" />
+        <button class="upload__btn">업로드</button>
+      </form>
+      <p class="muted text-xs" style="margin-top:6px;">※ 업로드는 방장 승인 후 전체에 표시됩니다.</p>
+    </section>
+  </aside>
+</div>
 
-    // 삭제: DRF DELETE /api/rooms/{slug}/  (모델 delete_room에서 room.deleted 브로드캐스트)
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async () => {
-        if (!confirm('정말 이 방을 삭제할까요? 이 작업은 되돌릴 수 없습니다.')) return;
-        try {
-          const res = await fetch(`/rooms/${slug}/delete/`, {
-            method: 'POST',
-            headers: { 'X-CSRFToken': csrftoken },
-            credentials: 'same-origin',
-          });
-          if (!res.ok && res.status !== 204) {
-            window.showToast?.('error', '삭제에 실패했습니다.');
-            return;
-          }
-          // HTTP 삭제가 성공했어도 실사용자들은 WS room.deleted를 받아 자동 퇴장됨.
-          // 혹시 소켓이 연결되기 전이라면 직접 리다이렉트
-          try {
-            localStorage.setItem('last_toast', JSON.stringify({ level:'warning', text:'방이 삭제되었습니다.' }));
-          } catch {}
-          window.location.href = "{{ request.build_absolute_uri|slice:'://'}}{% url 'home' %}".replace(window.location.origin, ""); // 홈으로
-        } catch {
-          window.showToast?.('error', '네트워크 오류로 삭제에 실패했습니다.');
-        }
-      });
-    }
+<script>
+(function(){
+  const slug = "{{ room.slug }}";
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const wsUrl = `${scheme}://${location.host}/ws/rooms/${slug}/`;
+  const csrftoken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
+  const HOME_URL = "{% url 'home' %}";
 
-    // ✅ 클라 상태(버전/유저 맵)
-    const state = {
-      version: 0,                  // 가장 최근 스냅샷/이벤트의 버전
-      users: new Map(),            // key: user_id, value: { user_id, username, is_owner }
-    };
+  const ME_ID    = {{ request.user.id|default:"null" }};
+  const OWNER_ID = {{ room.created_by_id|default:"null" }};
+  let I_AM_OWNER = (ME_ID !== null && OWNER_ID !== null && ME_ID === OWNER_ID);
 
+  const $chatLog   = document.getElementById('chat-log');
+  const $chatForm  = document.getElementById('chat-form');
+  const $chatInput = document.getElementById('chat-input');
+  const $uploadForm= document.getElementById('upload-form');
+  const $imageInput= document.getElementById('image-input');
+  const $online    = document.getElementById('online-list');
 
-    function el(tag, attrs = {}, ...children) {
-      const n = document.createElement(tag);
-      Object.entries(attrs).forEach(([k, v]) => v != null && n.setAttribute(k, v));
-      children.forEach(c => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
-      return n;
-    }
+  const $img      = document.getElementById('image-current');
+  const $imgEmpty = document.getElementById('image-empty');
+  const $imgPrev  = document.getElementById('image-prev');
+  const $imgNext  = document.getElementById('image-next');
+  const $imgInd   = document.getElementById('image-indicator');
+  const $viewer   = document.getElementById('image-viewer');
 
-    // 사용자 1명 렌더/갱신
-    function renderUserItem(user) {
-      const id = `user-${user.user_id}`;
-      const label = user.username + (user.is_owner ? " (방장)" : "");
-      const row = el("li", { id, class: "flex items-center justify-between border p-2 rounded" },
-        el("span", {}, label)
-      );
+  const $canvas  = document.getElementById('draw-canvas');
+  const $toolbar = document.getElementById('draw-toolbar');
+  const $pen     = document.getElementById('btn-pen');
+  const $eraser  = document.getElementById('btn-eraser');
+  const $clear   = document.getElementById('btn-clear');
+  const $toggle  = document.getElementById('btn-draw-toggle');
+  const $dl      = document.getElementById('btn-download');
+  const $del_btn = document.getElementById('btn-imgdelete');
 
-      // ✅ 내가 방장이고, 상대가 나 자신이 아닐 때만 강퇴 버튼 노출
-      if (I_AM_OWNER && user.user_id !== ME_ID) {
-        const kickBtn = el("button", { class: "px-2 py-1 text-sm border rounded text-red-600" }, "강퇴");
-        kickBtn.addEventListener("click", async () => {
-          if (!confirm(`${user.username} 님을 강퇴할까요?`)) return;
-          const url = `{% url 'api_kick' room.slug 0 %}`.replace('/0/', `/${user.user_id}/`);
-          const res = await fetch(url, { method: "POST", headers: { "X-CSRFToken": csrftoken } });
-          let data = {};
-          try { data = await res.json(); } catch {}
-          console.log("강퇴 응답:", res.ok, data.message, data.error);
-          if (res.ok) {
-            showToast?.('success', data.message || `${user.username} 님을 강퇴했습니다.`);
-            // 서버가 user_left를 브로드캐스트하므로 DOM은 자동 반영됨
-          } else {
-            showToast?.('error', (data && data.error) ? data.error : '권한이 없거나 실패했습니다.');
-          }
-        });
-        row.appendChild(kickBtn);
-      }
+  const $penColor= document.getElementById('pen-color');
+  const $penSize = document.getElementById('pen-size');
+  const ctx = $canvas.getContext('2d');
 
-      const old = document.getElementById(id);
-      if (old) old.replaceWith(row); else $userList.appendChild(row);
-    }
+  // === 디버그 & 쉬운 모드 스위치 ===
+  let DRAW_DEBUG = true;                 // 콘솔 로그 켜기/끄기
+  let EASY_MODE_IGNORE_IMAGE_ID = false; // true면 image_id 무시(디버그용)
+  let EASY_MODE_INDEX_FALLBACK = true;   // true면 id 안 맞아도 인덱스 같으면 허용
+  function logD(...args){ if (DRAW_DEBUG) console.log("[draw]", ...args); }
+  function warnD(...args){ if (DRAW_DEBUG) console.warn("[draw ⚠]", ...args); }
+  function errD(...args){ if (DRAW_DEBUG) console.error("[draw ⛔]", ...args); }
+  function groupD(label, fn){ if (!DRAW_DEBUG){ try{ fn(); }catch(e){} return; } console.groupCollapsed(`[draw] ${label}`); try{ fn(); } finally { console.groupEnd(); } }
+  window.__drawFlags = { get: () => ({ DRAW_DEBUG, EASY_MODE_IGNORE_IMAGE_ID, EASY_MODE_INDEX_FALLBACK }), set: (k,v)=>{ if (k==='DRAW_DEBUG') DRAW_DEBUG=!!v; if (k==='EASY_MODE_IGNORE_IMAGE_ID') EASY_MODE_IGNORE_IMAGE_ID=!!v; if (k==='EASY_MODE_INDEX_FALLBACK') EASY_MODE_INDEX_FALLBACK=!!v; } };
 
-    // 사용자 제거
-    function removeUserItem(userId) {
-      const li = document.getElementById(`user-${userId}`);
-      if (li) li.remove();
-    }
+  // A+B용 상태
+  let lastSentPoint = null;        // 전송 마지막 점(송신)
+  let currentPathId = null;        // 한 붓질 id(송신)
+  const remotePaths = new Map();   // path_id별 마지막 점(수신)
 
-    // 스냅샷 반영(정답 상태로 동기화)
-    function reconcileUsersFromSnapshot(snapshot) {
-      // (1) 버전 검사: 오래된 스냅샷이면 무시
-      if (typeof snapshot.version === "number" && snapshot.version < state.version) return;
-      if (typeof snapshot.version === "number") state.version = snapshot.version;
+  // 업로더 전용 보관
+  const localPendingFiles = new Map();
+  // 방장 대기 큐
+  const pendingQueue = new Map();
 
-      // (2) 목록 기준으로 Diff
-      const incoming = snapshot.members || snapshot.users || [];
-      const incomingIds = new Set(incoming.map(u => u.user_id));
+  // 유틸
+  function el(tag, attrs = {}, ...children) {
+    const n = document.createElement(tag);
+    Object.entries(attrs).forEach(([k, v]) => v != null && (k==='class'? (n.className=v) : n.setAttribute(k, v)));
+    children.forEach(c => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+    return n;
+  }
+  function show(el, display='block'){ el?.classList.remove('hidden'); el.style.display = display; }
+  function hide(el){ el?.classList.add('hidden'); el.style.display = 'none'; }
+  function fmtBytes(n){ if(!n&&n!==0)return ''; const u=['B','KB','MB','GB']; let i=0,v=n; while(v>=1024&&i<u.length-1){v/=1024;i++;} return `${v.toFixed(v<10&&i?1:0)} ${u[i]}`;}
 
-      // 추가/갱신
-      for (const u of incoming) {
-        const prev = state.users.get(u.user_id);
-        if (!prev || prev.username !== u.username || prev.is_owner !== u.is_owner) {
-          state.users.set(u.user_id, { ...u });
-          renderUserItem(u);
-        }
-      }
-      // 제거
-      for (const id of Array.from(state.users.keys())) {
-        if (!incomingIds.has(id)) {
-          state.users.delete(id);
-          removeUserItem(id);
-        }
-      }
-    }
+  // 이미지 키 정규화
+  function getImageKey(img){
+   const v = (img?.id) ?? (img?.image_id) ?? (img?.message_id) ?? (img?.image_url) ?? null;
+   return v == null ? null : String(v); // ✅ 항상 문자열로
+ }
 
-    // 델타: join/left
-    function handleJoined(ev) {
-      if (typeof ev.version === "number" && ev.version < state.version) return;
-      if (typeof ev.version === "number") state.version = ev.version;
-      const u = { user_id: ev.user_id, username: ev.username, is_owner: !!ev.is_owner };
-      state.users.set(u.user_id, u);
-      renderUserItem(u);
-    }
-    function handleLeft(ev) {
-      if (typeof ev.version === "number" && ev.version < state.version) return;
-      if (typeof ev.version === "number") state.version = ev.version;
-      state.users.delete(ev.user_id);
-      removeUserItem(ev.user_id);
-    }
-
-    function appendChat({user, message, ts}) {
-      const time = new Date(ts).toLocaleTimeString();
-      const row = el('div', {class: 'text-sm'},
-        el('span', {class: 'font-medium'}, user), document.createTextNode(' : '),
-        el('span', {}, message),
-        el('span', {class: 'text-[11px] text-gray-500 ml-2'}, time)
-      );
-      $log.appendChild(row);
-      $log.scrollTop = $log.scrollHeight;
-    }
-
-    function appendImage({id, user, image_url, ts}) {
-      const time = new Date(ts).toLocaleString();
-      const img = el('img', {src: image_url, class: 'w-full h-32 object-cover rounded'});
-      const dl  = el('a', {href: image_url, download: '', class: 'text-xs underline'}, '다운로드');
-      const del = el('button', {class: 'text-xs text-red-600 underline'}, '삭제');
-      const card = el('div', {class: 'border rounded p-2 bg-gray-50'},
-        el('div', {class: 'flex items-center justify-between text-xs mb-1'},
-          el('span', {class: 'text-gray-600'}, user),
-          el('span', {class: 'text-gray-400'}, time)
-        ),
-        img,
-        el('div', {class: 'flex items-center justify-between mt-1'}, dl, del)
-      );
-      del.addEventListener('click', async (e) => {
-        e.preventDefault();
-        if (!confirm('정말 삭제할까요?')) return;
-        const url = `{% url 'api_image_delete' room.slug 0 %}`.replace('/0/', `/${id}/`);
-        const res = await fetch(url, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
-        if (res.ok) card.remove();
-      });
-      $imageGrid.prepend(card);
-    }
-
-    let socket;
-    function connect() {
-      socket = new WebSocket(wsUrl);
-      socket.onmessage = (e) => {
-        try {
-          let data; try { data = JSON.parse(e.data); } catch { return; }
-          console.log("WS 메시지 수신:", data);
-          switch (data.event) {
-            case "presence_snapshot": reconcileUsersFromSnapshot(data); break;
-            //아직 정원, 비공개 변경 이벤트 없음, 비밀번호 변경 추가해야됨
-            case "room.updated":
-              if (data.name) document.getElementById('room-title').textContent = data.name;
-              if (data.topic) document.getElementById('room-topic').textContent = `주제: ${data.topic}`;
-              break;
-            case "room.deleted":
-              try{
-                localStorage.setItem('last_toast', JSON.stringify({
-                  level:'warning', text: data.msg || '방장이 방을 삭제되었습니다.'
-                }));
-              } catch {}
-              try { socket.close(4404); } catch {}
-              break;
-            case "chat": appendChat({user: data.user, message: data.message, ts: data.ts}); break;
-            case "image": appendImage({id: data.message_id, user: data.user, image_url: data.image_url, ts: data.ts}); break;
-            case "user_joined": handleJoined(data); break;
-            case "user_left": handleLeft(data); break;
-            case "kicked": 
-              try{
-                localStorage.setItem('last_toast', JSON.stringify({level:'error', text: data.msg || '강퇴되었습니다.'}));
-              } catch {}
-              try { socket.close(4403); } catch {}
-              break;
-            case "room_closed": 
-              try{
-                localStorage.setItem('last_toast', JSON.stringify({
-                  level:'warning', text: data.msg || '방이 삭제되었습니다.'
-                }));
-              } catch {}
-              try { socket.close(4404); } catch {}
-              break;;
-            // 나머지 이벤트 처리
-          }
-        } catch {}
-      };
-      socket.onclose = (e) => {
-        const no_enter =[4000,4001,4403,4404]; // 4000: 명시적 나가기, 4001: 비로그인, 4403: 강퇴, 4404: 방 종료
-        if (no_enter.includes(e.code)) {
-          window.location.href = HOME_URL;
-          return;
-        }
-        setTimeout(connect, 1000);
-      };
-    }
-
-    connect();
-
-    $chatForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const text = ($chatInput.value || '').trim();
-      if (!text || !socket || socket.readyState !== 1) return;
-      socket.send(JSON.stringify({ action: 'chat', message: text }));
-      $chatInput.value = '';
-    });
-
-    $uploadForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const files = $imageInput.files;
-      if (!files?.length) return;
-      const fd = new FormData();
-      for (const f of files) fd.append('images', f);
-      const res = await fetch(`{% url 'api_image_upload' room.slug %}`, {
-        method: 'POST',
-        headers: { 'X-CSRFToken': csrftoken },
-        body: fd,
-      });
-      if (res.ok) $imageInput.value = '';
-    });
-  })();
-  // 메시지 표시 함수 (토스트)
-  function showToast(level, text) {
-    const area = document.getElementById('toast-area');
-    if (!area) return;
-    const cl = level === 'success' ? 'is-ok' : level === 'warning' ? 'is-warn' : level === 'error' ? 'is-bad' : 'is-info';
-    const icon = level === 'success' ? '✅' : level === 'warning' ? '⚠️' : level === 'error' ? '⛔' : 'ℹ️';
-    const div = document.createElement('div');
-    div.className = `toast__item ${cl}`;
-    div.setAttribute('role','alert');
-    div.innerHTML = `<span class="toast__icon">${icon}</span>
-                    <div class="toast__msg">${text}</div>
-                    <button type="button" class="toast__close" onclick="this.parentElement.remove()">✕</button>`;
-    area.appendChild(div);
+  // 접속자
+  const state = {version:0, users:new Map()};
+  function renderUserItem(user){
+    const id = `user-${user.user_id}`;
+    const label = user.username + (user.is_owner ? " (방장)" : "");
+    const row = el("li", {id, class:"online__item"}, el("span",{}, label));
+    const old = document.getElementById(id);
+    if (old) old.replaceWith(row); else $online.appendChild(row);
+  }
+  function removeUserItem(userId){ document.getElementById(`user-${userId}`)?.remove(); }
+  function reconcileUsersFromSnapshot(ss){
+    if (typeof ss.version === "number" && ss.version < state.version) return;
+    if (typeof ss.version === "number") state.version = ss.version;
+    const incoming = ss.members || [];
+    const ids = new Set(incoming.map(u=>u.user_id));
+    for(const u of incoming){ state.users.set(u.user_id, u); renderUserItem(u); }
+    for(const id of Array.from(state.users.keys())){ if(!ids.has(id)){ state.users.delete(id); removeUserItem(id); } }
   }
 
+  // 채팅
+  function appendChat({user,message,ts}){
+    const time = new Date(ts).toLocaleTimeString();
+    const row = el('div', {class:'text-sm'},
+      el('span',{class:'font-medium'},user),' : ',
+      el('span',{},message),
+      el('span',{class:'text-[11px] text-gray-500 ml-2'},time)
+    );
+    $chatLog.appendChild(row);
+    $chatLog.scrollTop = $chatLog.scrollHeight;
+  }
 
-  </script>
+  // 이미지 리스트/뷰어
+  const imageState = { list:[], idx:-1 }; // {id,user,image_url,ts,overlay?}
+
+  function renderImageViewer(){
+    const n = imageState.list.length;
+    if (n === 0){
+      hide($img); show($imgEmpty);
+      hide($imgPrev); hide($imgNext); hide($imgInd);
+      hide($canvas); hide($toolbar);
+      imageState.idx = -1;
+      return;
+    }
+    if (imageState.idx < 0) imageState.idx = 0;
+    if (imageState.idx > n-1) imageState.idx = n-1;
+
+    const cur = imageState.list[imageState.idx];
+    hide($imgEmpty); show($img, 'block');
+
+    if (n > 1){
+      show($imgPrev,'inline-flex'); show($imgNext,'inline-flex');
+      $imgInd.textContent = `${imageState.idx+1} / ${n}`; show($imgInd, 'block');
+    } else {
+      hide($imgPrev); hide($imgNext); hide($imgInd);
+    }
+
+    groupD("renderImageViewer", () => {
+      logD("list.len", imageState.list.length, "idx", imageState.idx, "key", getImageKey(cur), "url", cur?.image_url);
+    });
+
+    const afterLoad = () => {
+      resizeCanvasToImage();
+      const hasKey = !!getImageKey(cur);
+      if (hasKey) { show($canvas,'block'); show($toolbar,'flex'); }
+      else { hide($canvas); hide($toolbar); }
+      restoreOverlayForCurrentImage();
+
+      if (ws?.readyState === 1 && cur && getImageKey(cur)) {
+        ws.send(JSON.stringify({ action:'draw.request_snapshot', image_id: getImageKey(cur) }));
+      }
+    };
+
+    if ($img.src === cur.image_url && $img.complete) afterLoad();
+    else {
+      $img.onload = () => { $img.onload = null; afterLoad(); };
+      $img.src = cur.image_url;
+    }
+  }
+
+  function pushImageMessage(msg, jumpToLatest=true){
+    msg.id = msg.id || msg.image_id || msg.message_id || msg.image_url || null;
+    const i = imageState.list.findIndex(it => getImageKey(it) === getImageKey(msg));
+    if (i >= 0) imageState.list[i] = msg;
+    else {
+      imageState.list.push(msg);
+      imageState.list.sort((a,b) => new Date(a.ts) - new Date(b.ts));
+    }
+    if (jumpToLatest) imageState.idx = imageState.list.length-1;
+    else if (imageState.idx === -1) imageState.idx = 0;
+    renderImageViewer();
+    restoreOverlayForCurrentImage();
+  }
+
+  // 드로잉/캔버스
+  const drawState = { enabled:false, drawing:false, mode:'pen', color:'#111111', size:4, dpr:devicePixelRatio||1 };
+  function resizeCanvasToImage(){
+    const imgRect = $img.getBoundingClientRect();
+    const viewRect= $viewer.getBoundingClientRect();
+    const left=imgRect.left-viewRect.left, top=imgRect.top-viewRect.top, w=imgRect.width, h=imgRect.height;
+    Object.assign($canvas.style, {left:left+'px', top:top+'px', width:w+'px', height:h+'px'});
+    const s = drawState.dpr;
+    $canvas.width = Math.max(1, Math.floor(w*s));
+    $canvas.height= Math.max(1, Math.floor(h*s));
+    ctx.setTransform(s,0,0,s,0,0);
+  }
+  function persistOverlayForCurrentImage(){
+    if (imageState.idx < 0) return;
+    try { imageState.list[imageState.idx].overlay = $canvas.toDataURL('image/png'); } catch {}
+  }
+  function restoreOverlayForCurrentImage(){
+    ctx.clearRect(0,0,$canvas.width,$canvas.height);
+    if (imageState.idx < 0) return;
+    const cur = imageState.list[imageState.idx];
+    if (cur?.overlay){
+      const im = new Image();
+      im.onload = () => ctx.drawImage(im, 0,0,$canvas.clientWidth,$canvas.clientHeight);
+      im.src = cur.overlay;
+    }
+  }
+  function getOffsetInCanvas(e){
+    const r = $canvas.getBoundingClientRect();
+    const x = (e.clientX ?? (e.touches?.[0]?.clientX || 0)) - r.left;
+    const y = (e.clientY ?? (e.touches?.[0]?.clientY || 0)) - r.top;
+    return {x,y};
+  }
+  function applyBrush(){
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.lineWidth = Number(drawState.size);
+    if (drawState.mode==='pen'){ ctx.globalCompositeOperation='source-over'; ctx.strokeStyle=drawState.color; }
+    else { ctx.globalCompositeOperation='destination-out'; ctx.strokeStyle='rgba(0,0,0,1)'; }
+  }
+
+  // 정규화 <-> 화면
+  function getImageBox(){
+    const a = $img.getBoundingClientRect(), b=$viewer.getBoundingClientRect();
+    return { left:a.left-b.left, top:a.top-b.top, width:a.width, height:a.height };
+  }
+  function toNormalizedPoint(x,y){ const b=getImageBox(); return {x:(x-b.left)/Math.max(1,b.width), y:(y-b.top)/Math.max(1,b.height)}; }
+  function fromNormalizedPoint(nx,ny){ const b=getImageBox(); return {x: b.left+nx*b.width, y:b.top+ny*b.height}; }
+
+  // 전송 배치
+  let sendTimer = null, queuedPoints = [];
+
+  function sendStrokeChunk(points, first=false, last=false){
+    if (!ws || ws.readyState !== 1 || imageState.idx<0 || !points.length) return;
+    const cur = imageState.list[imageState.idx];
+    const imageKey = getImageKey(cur);
+    if (!imageKey) { warnD("no imageKey; skip send"); return; }
+
+    // 연속성 보장
+    let payloadPts = points;
+    if (!first && lastSentPoint) payloadPts = [lastSentPoint, ...points];
+
+    const norm = payloadPts.map(p => {
+      const np = toNormalizedPoint(p.x,p.y);
+      return {x:np.x, y:np.y};
+    });
+
+    groupD("sendStrokeChunk", () => {
+      logD({ first, last, path_id: currentPathId, image_id: imageKey, image_idx: imageState.idx, pts: payloadPts.length, wsReady: ws.readyState });
+    });
+
+    ws.send(JSON.stringify({
+      action: 'draw.stroke',
+      image_id: String(imageKey),
+      image_idx: imageState.idx, // 인덱스도 함께
+      path_id: currentPathId || `${ME_ID||'anon'}_${Date.now()}`,
+      points: norm,
+      color: drawState.color,
+      size: drawState.size,
+      mode: drawState.mode,
+      first, last,
+      ts: Date.now()
+    }));
+
+    lastSentPoint = payloadPts[payloadPts.length - 1];
+  }
+
+  function beginStroke(e){
+    if (!drawState.enabled) { warnD("beginStroke ignored: draw disabled"); return; }
+    drawState.drawing = true;
+    currentPathId = (window.crypto?.randomUUID?.() 
+    || `${ME_ID||'anon'}-${Date.now()}-${Math.random().toString(36).slice(2)}`); // 붓질 id
+    lastSentPoint = null;                             // 스트로크 시작 리셋
+    applyBrush();
+
+    const {x,y} = getOffsetInCanvas(e);
+    ctx.beginPath();
+    ctx.moveTo(x,y);
+
+    logD("beginStroke", { path_id: currentPathId, start: {x,y}, image_idx: imageState.idx, image_id: getImageKey(imageState.list[imageState.idx]) });
+
+    sendStrokeChunk([{x,y}], true, false);
+  }
+
+  function drawStroke(e){
+    if (!drawState.enabled || !drawState.drawing) return;
+    const {x,y} = getOffsetInCanvas(e);
+    ctx.lineTo(x,y); ctx.stroke();
+    queuedPoints.push({x,y});
+    if (!sendTimer){
+      sendTimer = setTimeout(()=>{ const chunk=queuedPoints.splice(0); logD("drawStroke flush", { count: chunk.length }); sendStrokeChunk(chunk,false,false); sendTimer=null; },16);
+    }
+  }
+  function endStroke(){
+    if (!drawState.drawing) return;
+    drawState.drawing = false;
+
+    logD("endStroke", { queued: queuedPoints.length, lastSentPoint: !!lastSentPoint });
+
+    if (queuedPoints.length){
+      const chunk = queuedPoints.splice(0);
+      sendStrokeChunk(chunk, false, true);  // last=true로 종료 알림
+    } else if (lastSentPoint) {
+      sendStrokeChunk([lastSentPoint], false, true);
+    }
+
+    lastSentPoint = null;  // 스트로크 종료 후 리셋
+  }
+
+  $canvas.addEventListener('pointerdown', e=>{applyBrush();beginStroke(e);});
+  $canvas.addEventListener('pointermove', drawStroke);
+  window.addEventListener('pointerup', endStroke);
+  $canvas.addEventListener('pointerleave', endStroke);
+  $canvas.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+
+  // 툴바
+  $toggle.addEventListener('click', ()=>{ drawState.enabled=!drawState.enabled; $toggle.textContent = drawState.enabled?'그리기 끄기':'그리기 켜기'; });
+  $pen.addEventListener('click', ()=>{ drawState.mode='pen'; });
+  $eraser.addEventListener('click', ()=>{ drawState.mode='eraser'; });
+  $penColor.addEventListener('input', e=>{ drawState.color=e.target.value||'#111111'; });
+  $penSize.addEventListener('input', e=>{ drawState.size=Number(e.target.value||4); });
+  $clear.addEventListener('click', ()=>{
+    ctx.clearRect(0,0,$canvas.width,$canvas.height);
+    if (imageState.idx>=0){ const cur=imageState.list[imageState.idx]; if(cur) cur.overlay=null; }
+    if (ws?.readyState===1 && imageState.idx>=0){
+      const cur=imageState.list[imageState.idx];
+      const imageKey = getImageKey(cur);
+      if (imageKey) ws.send(JSON.stringify({ action:'draw.clear', image_id: String(imageKey), ts:Date.now() }));
+    }
+  });
+
+  $dl.addEventListener('click', async ()=>{
+    if (imageState.idx<0) return;
+    const w=$canvas.clientWidth, h=$canvas.clientHeight, s=drawState.dpr;
+    const t=document.createElement('canvas'); t.width=w*s; t.height=h*s; const tctx=t.getContext('2d'); tctx.setTransform(s,0,0,s,0,0);
+    await new Promise(r=>{ const base=new Image(); base.crossOrigin='anonymous'; base.onload=()=>{tctx.drawImage($img,0,0,w,h); r();}; base.src=$img.src; if(base.complete) r(); });
+    const ovURL=$canvas.toDataURL('image/png');
+    await new Promise(r=>{ const ov=new Image(); ov.onload=()=>{tctx.drawImage(ov,0,0,w,h); r();}; ov.src=ovURL; if(ov.complete) r(); });
+    const a=document.createElement('a'); const cur=imageState.list[imageState.idx];
+    a.href=t.toDataURL('image/png'); a.download=`annotated_${getImageKey(cur)||Date.now()}.png`; a.click();
+  });
+
+  // 리사이즈
+  window.addEventListener('resize', ()=>{
+    if ($img && !$img.classList.contains('hidden') && imageState.idx>=0){
+      persistOverlayForCurrentImage(); resizeCanvasToImage(); restoreOverlayForCurrentImage();
+    }
+  });
+
+  // 채팅 히스토리 (필요시 유지)
+  let chatPage=0, chatMaxPages=null, chatLoading=false;
+  async function loadOlderMessages(){
+    if(chatLoading) return;
+    if(chatMaxPages!==null && chatPage>=chatMaxPages) return;
+    chatLoading=true;
+    try{
+      const nextPage = chatPage+1;
+      const res = await fetch(`/rooms/${slug}/messages/?page=${nextPage}`);
+      if(!res.ok) return;
+      const data = await res.json();
+      const oldH=$chatLog.scrollHeight, oldT=$chatLog.scrollTop;
+      const items=(data.results||[]).slice().reverse();
+      for(const m of items){
+        if (m.image_url){
+          appendChat({user:m.user||'user', message:'[이미지 업로드]', ts:m.ts});
+          logD("history image", { image_id: m.image_id, message_id: m.id||m.message_id, image_url: m.image_url });
+          pushImageMessage({id: m.image_id || m.id || m.message_id || m.image_url || null, image_id:m.image_id, message_id:m.message_id, user:m.user, image_url:m.image_url, ts:m.ts}, false);
+        } else {
+          appendChat({user:m.user, message:m.content, ts:m.ts});
+        }
+      }
+      chatPage = data.page || nextPage;
+      chatMaxPages = data.num_pages ?? chatMaxPages;
+      const newH=$chatLog.scrollHeight; $chatLog.scrollTop = newH - (oldH - oldT);
+    } finally { chatLoading=false; }
+  }
+  document.addEventListener('DOMContentLoaded', async()=>{ await loadOlderMessages(); $chatLog.scrollTop=$chatLog.scrollHeight; });
+  $chatLog.addEventListener('scroll', ()=>{ if ($chatLog.scrollTop<=40) loadOlderMessages(); });
+
+  // WebSocket
+  let ws;
+  function connect(){
+    ws = new WebSocket(wsUrl);
+    ws.onopen = () => {
+      logD("ws open", { url: wsUrl, readyState: ws.readyState });
+      if (imageState.list.length>0 && imageState.idx>=0){
+        const img = imageState.list[imageState.idx];
+        ws.send(JSON.stringify({ action:'image.goto', idx:imageState.idx, image_id:String(getImageKey(img)), ts:Date.now() }));
+      }
+    };
+    ws.onerror = (e) => { errD("ws error", e); };
+    ws.onmessage = (e) => {
+      let data; try{ data=JSON.parse(e.data);}catch{return;}
+
+      switch (data.event){
+        case "presence_snapshot": reconcileUsersFromSnapshot(data); break;
+        case "room.updated":
+          if (data.name)  document.getElementById('room-title').textContent = data.name;
+          if (data.topic) document.getElementById('room-topic').textContent = `주제: ${data.topic}`;
+          break;
+        case "room.deleted":
+          try{ localStorage.setItem('last_toast', JSON.stringify({level:'warning', text:data.msg||'방이 삭제되었습니다.'})); }catch{}
+          try{ ws.close(4404);}catch{}
+          break;
+        case "chat":
+          appendChat({user:data.user, message:data.message, ts:data.ts}); break;
+        case "image":
+          groupD("recv image event", () => logD({ image_id: data.image_id, message_id: data.message_id, image_url: data.image_url }));
+          appendChat({user:data.user||data.sender||'user', message:'[이미지 업로드]', ts:data.ts});
+          pushImageMessage({
+            id: data.image_id || data.message_id || data.image_url || null,
+            image_id: data.image_id,
+            message_id: data.message_id,
+            user: data.user || data.sender,
+            image_url: data.image_url,
+            ts: data.ts
+          }, true);
+          break;
+        case "user_joined": 
+          const u =data;
+          const user = { user_id: u.user_id, username: u.username, is_owner: !!u.is_owner};
+          state.users.set(user.user_id, user); //메모리 상태 갱신
+          renderUserItem(user);
+          break;
+        case "user_left": 
+          const uid = data.user_id;
+          if (uid != null) {
+            state.users.delete(uid);
+            removeUserItem(uid);
+          }
+          break;
+
+      case "owner_changed":
+        for (const u of state.users.values()) {
+          u.is_owner = (u.user_id === data.new_owner_id);
+        }
+        $online.innerHTML = "";
+        for (const u of state.users.values()) renderUserItem(u);
+
+        // 내가 새 방장인지 확인해서 UI 토글
+        const iAmNewOwner = (ME_ID != null && ME_ID === data.new_owner_id);
+        setOwnerUI(iAmNewOwner);
+        break;
+  
+
+        case "kicked":
+          try{ localStorage.setItem('last_toast', JSON.stringify({level:'error', text:data.msg||'강퇴되었습니다.'})); }catch{}
+          try{ ws.close(4403);}catch{}
+          break;
+        case "room_closed":
+          try{ localStorage.setItem('last_toast', JSON.stringify({level:'warning', text:data.msg||'방이 삭제되었습니다.'})); }catch{}
+          try{ ws.close(4404);}catch{}
+          break;
+      }
+
+      // action 기반
+      if (data.action === 'draw.stroke'){
+        const { image_id, image_idx, path_id, points, color, size, mode, first, last } = data;
+        const cur = imageState.list[imageState.idx];
+        if (!cur) { warnD("recv stroke but no current image"); return; }
+
+        const curKey = getImageKey(cur);
+        const sameId = (curKey != null && image_id != null) && (String(curKey) === String(image_id));
+        const sameIdx = (typeof image_idx === "number") && (image_idx === imageState.idx);
+        if (!(EASY_MODE_IGNORE_IMAGE_ID || sameId || (EASY_MODE_INDEX_FALLBACK && sameIdx))) {
+          warnD("drop stroke: image mismatch", { curKey, image_id, curIdx: imageState.idx, image_idx });
+          return;
+        }
+
+        // 디버그 로그
+        groupD("recv draw.stroke", () => {
+          logD({ first, last, path_id, image_id, image_idx, pts: points?.length ?? 0, mode, size, color });
+        });
+
+        ctx.lineCap='round';
+        ctx.lineJoin='round';
+        ctx.lineWidth=Number(size||4);
+        if (mode==='pen'){ ctx.globalCompositeOperation='source-over'; ctx.strokeStyle=color||'#111'; }
+        else { ctx.globalCompositeOperation='destination-out'; ctx.strokeStyle='rgba(0,0,0,1)'; }
+
+        // 포인트 없으면 종료 신호만 처리
+        if (!Array.isArray(points) || points.length === 0) {
+          if (last && path_id) remotePaths.delete(path_id);
+          return;
+        }
+
+        // ── 핵심 방어 로직 ──
+        // path_id가 없거나 first가 명시적으로 false가 아니면 "연결 금지"
+        const allowLink = !!path_id && (first === false);
+
+        // path 상태
+        let state = remotePaths.get(path_id) || { last: null, ts: 0 };
+
+        // 오래된 path는 끊기(2초 타임아웃)
+        const now = Date.now();
+        if (state.ts && now - state.ts > 2000) {
+          state = { last: null, ts: now };
+        }
+
+        // 화면 좌표로 변환
+        const toView = (pt) => fromNormalizedPoint(pt.x, pt.y);
+        const vpts = points.map(toView);
+
+        // 그리기
+        ctx.beginPath();
+        if (allowLink && state.last) {
+          // 이전 청크와 ‘같은 path_id’ + ‘first === false’일 때만 이어 그리기
+          ctx.moveTo(state.last.x, state.last.y);
+          for (let i=0;i<vpts.length;i++) ctx.lineTo(vpts[i].x, vpts[i].y);
+        } else {
+          // 새 스트로크(또는 path_id/first 정보가 불완전): 독립적으로 그린다
+          ctx.moveTo(vpts[0].x, vpts[0].y);
+          for (let i=1;i<vpts.length;i++) ctx.lineTo(vpts[i].x, vpts[i].y);
+          if (vpts.length === 1) ctx.lineTo(vpts[0].x + 0.001, vpts[0].y + 0.001);
+        }
+        ctx.stroke();
+
+        // 상태 갱신/정리
+        if (path_id) {
+          state.last = vpts[vpts.length - 1];
+          state.ts = now;
+          if (last) remotePaths.delete(path_id);
+          else remotePaths.set(path_id, state);
+        }
+        // path_id가 없으면 상태를 저장하지 않아 “붙는 문제”를 원천 차단
+        return;
+      }
+
+
+      if (data.action === 'draw.clear'){
+        const { image_id } = data;
+        const cur = imageState.list[imageState.idx];
+        const curKey = getImageKey(cur);
+        logD("recv draw.clear", { image_id, curKey, idx: imageState.idx });
+        if (cur && String(curKey) === String(image_id)){
+          ctx.clearRect(0,0,$canvas.width,$canvas.height);
+          cur.overlay = null;
+        }
+        return;
+      }
+      if (data.action === 'draw.snapshot') {
+        const { image_id, strokes } = data;
+        const cur = imageState.list[imageState.idx];
+        logD("recv draw.snapshot", { image_id, curKey: getImageKey(cur), idx: imageState.idx, strokes: strokes?.length ?? 0 });
+        if (!cur || String(getImageKey(cur)) !== String(image_id)) return;
+
+        // 스냅샷에서도 path_id 기준으로 이어 그리기(라이브 수신과 동일한 보정)
+        ctx.clearRect(0, 0, $canvas.width, $canvas.height);
+        const lastByPath = new Map(); // path_id -> {x,y}
+
+        if (Array.isArray(strokes)) {
+          for (const s of strokes) {
+            const color = s.color || '#111';
+            const size = s.size || 4;
+            const mode = s.mode || 'pen';
+            const pts = s.points || [];
+            const pid = s.path_id || s.pid || null; // 서버가 path_id를 다르게 보낼 수도 있음
+            const first = !!s.first;
+
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = Number(size);
+            if (mode === 'pen') { ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = color; }
+            else { ctx.globalCompositeOperation = 'destination-out'; ctx.strokeStyle = 'rgba(0,0,0,1)'; }
+
+            if (!pts.length) continue;
+
+            const vpts = pts.map(p => fromNormalizedPoint(p.x, p.y));
+
+            ctx.beginPath();
+            const prev = pid ? lastByPath.get(pid) : null;
+
+            if (prev && !first) {
+              // 이전 청크의 마지막 점에서 이어서 그리기
+              ctx.moveTo(prev.x, prev.y);
+              for (let i = 0; i < vpts.length; i++) {
+                ctx.lineTo(vpts[i].x, vpts[i].y);
+              }
+            } else {
+              // 새 스트로크(혹은 path_id 정보가 없을 때는 청크 단위로 그림)
+              ctx.moveTo(vpts[0].x, vpts[0].y);
+              for (let i = 1; i < vpts.length; i++) {
+                ctx.lineTo(vpts[i].x, vpts[i].y);
+              }
+              if (vpts.length === 1) {
+                ctx.lineTo(vpts[0].x + 0.001, vpts[0].y + 0.001);
+              }
+            }
+
+            ctx.stroke();
+
+            // 마지막 점 저장(다음 청크 연결용)
+            if (pid) lastByPath.set(pid, vpts[vpts.length - 1]);
+          }
+        }
+        return;
+      }
+
+      if (data.action === 'image.goto'){
+        persistOverlayForCurrentImage();
+        if (typeof data.idx === 'number'){
+          imageState.idx = Math.max(0, Math.min(imageState.list.length-1, data.idx));
+        } else if (data.image_id != null){
+          const i=imageState.list.findIndex(x=>getImageKey(x)===data.image_id);
+          if (i>=0) imageState.idx=i;
+        }
+        renderImageViewer();
+        return;
+      }
+
+      // 승인 플로우
+      if (data.action === 'image.propose' && I_AM_OWNER){
+        const { pending_id, uploader_id, uploader_name, name, size, type } = data;
+        pendingQueue.set(pending_id, { uploader_id, uploader_name, name, size, type });
+        renderPending();
+        return;
+      }
+      if (data.action === 'image.approved'){
+        const { pending_id, uploader_id } = data;
+        if (I_AM_OWNER){ pendingQueue.delete(pending_id); renderPending(); }
+        if (ME_ID === uploader_id){
+          const file = localPendingFiles.get(pending_id);
+          if (file){
+            const fd = new FormData(); fd.append('images', file);
+            fetch(`{% url 'api_image_upload' room.slug %}`, { method:'POST', headers:{'X-CSRFToken':csrftoken}, body:fd })
+              .then(r=>r.json())
+              .then(j=>{
+                if (j?.results?.length){
+                  for (const it of j.results){
+                    pushImageMessage({ id: it.image_id || it.id || it.message_id || it.image_url || null, image_id:it.image_id, message_id:it.message_id, user:'me', image_url: it.image_url, ts: it.ts||new Date().toISOString() }, true);
+                  }
+                }
+                localPendingFiles.delete(pending_id);
+                showToast('success','이미지 업로드가 승인되어 게시되었습니다.');
+              }).catch(()=>showToast('error','업로드 실패'));
+          }
+        }
+        return;
+      }
+      if (data.action === 'image.rejected'){
+        const { pending_id, uploader_id } = data;
+        if (I_AM_OWNER){ pendingQueue.delete(pending_id); renderPending(); }
+        if (ME_ID === uploader_id){ localPendingFiles.delete(pending_id); showToast('warning','이미지 업로드가 거절되었습니다.'); }
+        return;
+      }
+      if (data.action === 'image.deleted') {
+        const { message_id } = data;
+        appendChat({ user: 'system', message: '[이미지 삭제됨]', ts: data.ts }); 
+        removeImageByMessageId(message_id);
+        return;
+      }
+
+    };
+    ws.onclose = (e)=>{
+      warnD("ws close", {code: e.code, reason: e.reason, wasClean: e.wasClean});
+      const no_reenter=[4000,4001,4403,4404];
+      if (no_reenter.includes(e.code)){ location.href = HOME_URL; return; }
+      setTimeout(connect, 1000);
+    };
+  }
+  connect();
+
+  // 이미지 인덱스 이동 + 방송
+  function gotoIndex(idx){
+    if (idx<0 || idx>=imageState.list.length) return;
+    imageState.idx = idx; renderImageViewer();
+  }
+  $imgPrev.addEventListener('click', ()=>{
+    if (imageState.list.length===0) return;
+    persistOverlayForCurrentImage();
+    const nextIdx = Math.max(0, imageState.idx-1);
+    gotoIndex(nextIdx);
+    const img = imageState.list[nextIdx];
+    if (ws?.readyState===1) ws.send(JSON.stringify({ action:'image.goto', idx:nextIdx, image_id:String(getImageKey(img)), ts:Date.now() }));
+  });
+  $imgNext.addEventListener('click', ()=>{
+    if (imageState.list.length===0) return;
+    persistOverlayForCurrentImage();
+    const nextIdx = Math.min(imageState.list.length-1, imageState.idx+1);
+    gotoIndex(nextIdx);
+    const img = imageState.list[nextIdx];
+    if (ws?.readyState===1) ws.send(JSON.stringify({ action:'image.goto', idx:nextIdx, image_id:String(getImageKey(img)), ts:Date.now() }));
+  });
+
+  // 채팅 전송
+  $chatForm?.addEventListener('submit', e=>{
+    e.preventDefault();
+    const text = ($chatInput?.value||'').trim();
+    if (!text || !ws || ws.readyState!==1) return;
+    ws.send(JSON.stringify({ action:'chat', message:text, ts:Date.now() }));
+    $chatInput.value=''; $chatLog.scrollTop=$chatLog.scrollHeight;
+  });
+
+  // 업로드: 제안→(방장 승인 후) 실제 업로드
+  $uploadForm?.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const files = $imageInput?.files;
+    if (!files?.length) return;
+
+    for (const f of files){
+      const pendingId = `${ME_ID||'anon'}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      localPendingFiles.set(pendingId, f); // 업로더만 로컬 보관
+      if (ws?.readyState===1){
+        ws.send(JSON.stringify({ action:'image.propose', pending_id: pendingId, name:f.name, size:f.size, type:f.type, ts:Date.now() }));
+      }
+    }
+    $imageInput.value='';
+    showToast('info','방장 승인 대기 중…');
+  });
+
+  // 방장: 대기 렌더
+  function renderPending(){
+    if (!I_AM_OWNER) return;
+    const $panel = document.getElementById('pending-panel');
+    const $list  = document.getElementById('pending-list');
+    const $empty = document.getElementById('pending-empty');
+    $list.innerHTML='';
+    if (pendingQueue.size===0){ show($empty); return; }
+    $empty.style.display='none';
+    for (const [pid,item] of pendingQueue.entries()){
+      const row = el('li',{class:'online__item'},
+        el('div',{},
+          el('div',{class:'text-sm font-semibold'}, item.name||'(이름 없음)'),
+          el('div',{class:'text-xs text-gray-500'}, `${item.uploader_name||'user'} · ${fmtBytes(item.size)} · ${item.type||''}`)
+        )
+      );
+      const okBtn = el('button',{class:'px-2 py-1 text-sm border rounded'},'승인');
+      const noBtn = el('button',{class:'px-2 py-1 text-sm border rounded ml-2'},'거절');
+      okBtn.addEventListener('click', ()=>{ if(ws?.readyState===1){ ws.send(JSON.stringify({ action:'image.approved', pending_id:pid, uploader_id:item.uploader_id, ts:Date.now() })); }});
+      noBtn.addEventListener('click', ()=>{ if(ws?.readyState===1){ ws.send(JSON.stringify({ action:'image.rejected', pending_id:pid, uploader_id:item.uploader_id, ts:Date.now() })); }});
+      const btns = el('div',{}); btns.appendChild(okBtn); btns.appendChild(noBtn);
+      row.appendChild(btns); $list.appendChild(row);
+    }
+  }
+  function removeImageByMessageId(messageId) {
+    const rmIdx = imageState.list.findIndex(it =>
+      String(it.message_id || it.id || '') === String(messageId)
+    );
+    if (rmIdx < 0) return false;
+
+    imageState.list.splice(rmIdx, 1); // 목록에서 제거
+
+    if (imageState.list.length === 0) { // 빈목록이면 초기화
+      imageState.idx = -1;
+      ctx.clearRect(0,0,$canvas.width,$canvas.height);
+      renderImageViewer();
+      return true;
+    }
+
+    if (rmIdx <= imageState.idx) { //이미지의 개수가 줄었으므로 인덱스 조정
+      imageState.idx = Math.max(0, imageState.idx - 1);
+    }
+
+    ctx.clearRect(0,0,$canvas.width,$canvas.height);
+    renderImageViewer();
+    return true;
+  }
+  if($del_btn) {
+    $del_btn.addEventListener('click', async () => {
+      if (imageState.idx < 0 || imageState.list.length === 0) {
+        showToast('warning', '삭제할 이미지가 없습니다.');
+        return;
+      }
+      const cur = imageState.list[imageState.idx];
+      const messageId = cur.message_id || cur.id;
+      if (!messageId) {
+        showToast('error', '이 이미지의 ID를 찾을 수 없습니다.');
+        return;
+      }
+      if (!confirm('이 이미지를 삭제할까요?')) return;
+
+      try {
+        const res = await fetch(`/rooms/${slug}/images/${messageId}/delete/`, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrftoken },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          const msg = (data && data.error) || (res.status === 403 ? '삭제 권한이 없습니다.' : '삭제에 실패했습니다.');
+          showToast('error', msg);
+          return;
+        }
+        // 서버가 image.deleted 브로드캐스트를 보냄. 낙관적 UI 원하면 아래 한 줄 주석 해제
+        // removeImageByMessageId(messageId);
+        showToast('success', '이미지를 삭제했습니다.');
+      } catch {
+        showToast('error', '네트워크 오류로 삭제에 실패했습니다.');
+      }
+    });
+  }
+
+  // 초기 렌더
+  renderImageViewer();
+
+  const $leaveForm = document.getElementById('room-leave');
+  $leaveForm?.addEventListener('submit', function (e) {
+    e.preventDefault();
+    try { ws && ws.readyState === 1 && ws.send(JSON.stringify({ action: "leave" })); } catch {}
+    setTimeout(() => e.target.submit(), 150);
+  });
+
+  function setOwnerUI(isOwner){
+    I_AM_OWNER = !!isOwner;
+    document.querySelectorAll('.owner-only').forEach(el => {
+      el.style.display = isOwner ? '' : 'none';
+    });
+  }
+  setOwnerUI(!!I_AM_OWNER);
+
+})();
+
+
+// 토스트
+function showToast(level, text){
+  const area=document.getElementById('toast-area'); if(!area) return;
+  const cl = level==='success'?'is-ok': level==='warning'?'is-warn': level==='error'?'is-bad':'is-info';
+  const icon = level==='success'?'✅': level==='warning'?'⚠️': level==='error'?'⛔':'ℹ️';
+  const div=document.createElement('div');
+  div.className=`toast__item ${cl}`; div.setAttribute('role','alert');
+  div.innerHTML=`<span class="toast__icon">${icon}</span>
+                 <div class="toast__msg">${text}</div>
+                 <button type="button" class="toast__close" onclick="this.parentElement.remove()">✕</button>`;
+  area.appendChild(div);
+}
+</script>
+
 {% endblock %}
