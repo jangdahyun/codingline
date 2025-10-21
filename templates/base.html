@@ -20,6 +20,7 @@
 
         {% if request.user.is_authenticated %}
           <span class="nav__greet">안녕하세요, {{ request.user.username }}님</span>
+          <a class="link" href="{% url 'mypage' %}">마이페이지</a>
           <a class="link" href="{% url 'account_logout' %}">로그아웃</a>
         {% else %}
           <a class="link" href="{% url 'account_login' %}">로그인</a>

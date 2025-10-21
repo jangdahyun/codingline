@@ -55,6 +55,7 @@
 
 <form id="room-leave" action="{% url 'room-leave' room.slug %}" method="post" class="mb-4">
   {% csrf_token %}
+  <input type="hidden" name="skip_cleanup" value="0" />
   <button class="btn" id="btn-leave">방 나가기</button>
 </form>
 
@@ -911,9 +912,24 @@
 
   const $leaveForm = document.getElementById('room-leave');
   $leaveForm?.addEventListener('submit', function (e) {
+    const form = e.target;
+    const skipField = form.querySelector('input[name="skip_cleanup"]');
+    let sent = false;
+    try {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "leave" }));
+        sent = true;
+      }
+    } catch (err) {
+      console.warn("[leave] ws send failed", err);
+    }
+    if (!sent) {
+      if (skipField) skipField.value = "0";
+      return;
+    }
     e.preventDefault();
-    try { ws && ws.readyState === 1 && ws.send(JSON.stringify({ action: "leave" })); } catch {}
-    setTimeout(() => e.target.submit(), 150);
+    if (skipField) skipField.value = "1";
+    setTimeout(() => form.submit(), 150);
   });
 
   function setOwnerUI(isOwner){

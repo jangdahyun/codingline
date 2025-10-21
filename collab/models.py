@@ -1,8 +1,4 @@
 # models.py
-from ast import Not
-from calendar import c
-from operator import ge
-from tkinter import E
 from django.db import models, transaction             # ORM + 트랜잭션
 from django.conf import settings                      # AUTH_USER_MODEL 참조
 from django.utils.text import slugify                 # 한글/공백 → 슬러그
@@ -128,83 +124,111 @@ class Room(models.Model):
                 # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 갱신 자체는 계속 진행
                 pass
 
-            def _lobby_updated():
-                try:
-                    from channels.layers import get_channel_layer
-                    from asgiref.sync import async_to_sync
-                    channel_layer = get_channel_layer()
-                    async_to_sync(channel_layer.group_send)(
-                        "lobby",   # 로비 그룹
-                        {
-                            "type": "lobby.event",  # 컨슈머의 핸들러 이름
-                              # 프론트에서 분기 처리
-                            "payload": {
-                                "event": "room_updated",
-                                "slug": self.slug,
-                                "name": self.Romname,
-                                "topic": self.topic,
-                                "is_private": self.is_private,
-                                "capacity": self.capacity,
-                                "requires_password": self.requires_password,
-                            },
-                        },
-                    )
-                except Exception:
-                    pass  # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 무시
-            transaction.on_commit(_lobby_updated)
+            # def _lobby_updated():
+            #     try:
+            #         from channels.layers import get_channel_layer
+            #         from asgiref.sync import async_to_sync
+            #         channel_layer = get_channel_layer()
+            #         async_to_sync(channel_layer.group_send)(
+            #             "lobby",   # 로비 그룹
+            #             {
+            #                 "type": "lobby.event",  # 컨슈머의 핸들러 이름
+            #                   # 프론트에서 분기 처리
+            #                 "payload": {
+            #                     "event": "room_updated",
+            #                     "slug": self.slug,
+            #                     "name": self.Romname,
+            #                     "topic": self.topic,
+            #                     "is_private": self.is_private,
+            #                     "capacity": self.capacity,
+            #                     "requires_password": self.requires_password,
+            #                 },
+            #             },
+            #         )
+            #     except Exception:
+            #         pass  # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 무시
+            # transaction.on_commit(_lobby_updated)
         return self
     
     @transaction.atomic
     def room_delete(self, *, actor, broadcast=True):
+        # 1) 권한 확인: 방장 또는 스태프만 허용
         if actor.pk != self.created_by_id and not getattr(actor, "is_staff", False):
             raise PermissionDenied("권한이 없습니다.")
-        # 관련 멤버십/메시지 등도 모두 삭제됨(CASCADE)
 
-        room_slug = self.slug 
+        # 2) 삭제 전 식별자(값) 백업: 삭제 후엔 self 접근이 불안정하므로 미리 보관
+        room_id   = self.id
+        room_slug = self.slug
         room_name = self.Romname
+
+        # 3) 브로드캐스트가 켜져 있으면, 트랜잭션 커밋 이후에만 이벤트를 쏘도록 예약
         if broadcast:
-            try:
-                from channels.layers import get_channel_layer
-                from asgiref.sync import async_to_sync
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    f"room_{self.id}",
-                    {
-                        "type": "room.event",     # 컨슈머의 핸들러 이름
-                        "event": "room.deleted",  # 프론트에서 분기 처리
-                        "payload": {
-                            "slug": room_slug,
-                            "name": room_name,
-                        },
-                    },
-                )
-            except Exception:
-                # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 삭제 자체는 계속 진행
-                pass
-            def _lobby_deleted():
+            def _after_commit_broadcasts():
+                """
+                DB 커밋이 확정된 '이후'에만 실행.
+                - 정합성 보장: 롤백되면 전송 안 됨
+                - 프론트 즉시 재조회 시 404/레이스 조건 완화
+                """
                 try:
                     from channels.layers import get_channel_layer
                     from asgiref.sync import async_to_sync
                     channel_layer = get_channel_layer()
+
+                    # (선택) 방 참여자 그룹에 'room.deleted' 통지
+                    # - 방 탭을 열어둔 사용자에게 즉시 안내/리다이렉트 용
                     async_to_sync(channel_layer.group_send)(
-                        "lobby",   # 로비 그룹
+                        f"room_{room_id}",
                         {
-                            "type": "lobby.event",  # 컨슈머의 핸들러 이름
-                              # 프론트에서 분기 처리
+                            "type": "room.event",
+                            "event": "room.deleted",
                             "payload": {
-                                "event": "room_deleted",
+                                # 표준 키
+                                "room_id": room_id,
+                                "room_slug": room_slug,
+                                "room_name": room_name,
+
+                                # (임시 호환용) 구키 — 프론트 이전 완료 후 삭제 가능
                                 "slug": room_slug,
                                 "name": room_name,
                             },
                         },
                     )
+
+                    # 로비에 'room_deleted' 단 1회만 통지 (중복 전송 금지)
+                #     async_to_sync(channel_layer.group_send)(
+                #         "lobby",
+                #         {
+                #             "type": "lobby.event",
+                #             "payload": {
+                #                 "event": "room_deleted",
+                #                 # 표준 키
+                #                 "room_id": room_id,
+                #                 "room_slug": room_slug,
+                #                 "room_name": room_name,
+
+                #                 # (임시 호환용) 구키 — 프론트 이전 완료 후 삭제 가능
+                #                 "slug": room_slug,
+                #                 "name": room_name,
+                #             },
+                #         },
+                #     )
                 except Exception:
-                    pass  # 채널 레이어가 아직 준비 전이거나 테스트 환경일 수 있으므로, 무시
-            transaction.on_commit(_lobby_deleted)
+                    # 채널 레이어 미준비/테스트 환경 등은 무시(삭제 자체는 계속 진행)
+                    pass
 
+            # 커밋 후 실행 예약
+            transaction.on_commit(_after_commit_broadcasts)
+
+        # 4) 실제 삭제 수행 (CASCADE로 멤버십/메시지 등 함께 삭제)
         super(Room, self).delete()
-        return {"slug": room_slug, "name": room_name}
 
+        # 5) 호출자에게 삭제 결과(표준 키) 반환
+        return {
+            "room_id": room_id,
+            "room_slug": room_slug,
+            "room_name": room_name,
+        }
+    
     # 입장 가능 여부 + 사유
     def can_enter(self, user) -> tuple[bool, str | None]:
         if not user or isinstance(user, AnonymousUser):

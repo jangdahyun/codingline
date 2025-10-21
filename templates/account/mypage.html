@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}마이페이지 · CodingLine{% endblock %}
+
+{% block content %}
+<link id="auth-style" rel="stylesheet" href="{% static 'css/codingline.css' %}">
+<section class="head">
+  <h1 class="head__title">마이페이지</h1>
+  <p class="head__desc">프로필과 최근 활동을 한눈에 확인하세요.</p>
+</section>
+
+{% with user=request.user %}
+<div class="grid">
+  <div class="col--left">
+    <article class="card">
+      <h2 class="card__title">내 프로필</h2>
+      <div style="display:flex; gap:16px; align-items:center;">
+        <div class="item__thumb" style="width:64px; height:64px;">
+          {% if user.avatar %}
+            <img src="{{ user.avatar.url }}" alt="{{ user.display_name|default:user.username }}님의 아바타"
+                 style="width:100%; height:100%; object-fit:cover; border-radius:10px;">
+          {% else %}
+            <span style="font-size:20px; color:var(--muted);">
+              {{ user.display_name|default:user.username|first|upper }}
+            </span>
+          {% endif %}
+        </div>
+        <div>
+          <div style="font-weight:700; font-size:16px;">
+            {{ user.display_name|default:user.username }}
+          </div>
+          <div class="muted" style="font-size:13px;">
+            {{ user.email }}
+          </div>
+        </div>
+      </div>
+      <dl style="margin:16px 0 0; display:grid; gap:8px; font-size:13px;">
+        <div style="display:flex; justify-content:space-between; gap:12px;">
+          <dt class="muted">전화번호</dt>
+          <dd>{{ user.phone|default:"-" }}</dd>
+        </div>
+        <div style="display:flex; justify-content:space-between; gap:12px;">
+          <dt class="muted">생년월일</dt>
+          <dd>
+            {% if user.birth_date %}
+              {{ user.birth_date|date:"Y년 n월 j일" }}
+            {% else %}
+              -
+            {% endif %}
+          </dd>
+        </div>
+        <div style="display:flex; justify-content:space-between; gap:12px;">
+          <dt class="muted">가입일</dt>
+          <dd>{{ user.date_joined|date:"Y.m.d" }}</dd>
+        </div>
+        <div style="display:flex; justify-content:space-between; gap:12px;">
+          <dt class="muted">마지막 로그인</dt>
+          <dd>
+            {% if user.last_login %}
+              {{ user.last_login|date:"Y.m.d H:i" }}
+            {% else %}
+              -
+            {% endif %}
+          </dd>
+        </div>
+      </dl>
+      <button type="button" class="btn btn--brand" data-modal-open="#profile-edit-modal" style="margin-top:16px;">프로필 수정</button>
+    </article>
+
+    <article class="card">
+      <h2 class="card__title">빠른 이동</h2>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <a class="btn btn--brand" href="{% url 'home' %}">방 둘러보기</a>
+        <a class="btn" href="{% url 'account_change_password' %}">비밀번호 변경</a>
+        <a class="btn" href="{% url 'account_logout' %}">로그아웃</a>
+      </div>
+    </article>
+  </div>
+
+  <div class="col--right" style="display:grid; gap:16px;">
+    <article class="card">
+      <div class="list__head">
+        <h2 class="card__title" style="margin:0;">내가 만든 방</h2>
+        <span class="muted">{{ rooms_created|length }}</span>
+      </div>
+      {% if rooms_created %}
+        <ul class="list">
+          {% for room in rooms_created %}
+            <li class="item">
+              <div class="item__left">
+                <div class="item__thumb">{{ room.Romname|first|upper }}</div>
+                <div>
+                  <div class="item__title">{{ room.Romname }}</div>
+                  <div class="item__meta">주제: {{ room.topic }}</div>
+                </div>
+              </div>
+              <a class="link" href="{% url 'room-detail' room.slug %}">바로가기</a>
+            </li>
+          {% empty %}
+            <li class="muted">아직 만든 방이 없습니다.</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">아직 만든 방이 없습니다.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="list__head">
+        <h2 class="card__title" style="margin:0;">참여 중인 방</h2>
+        <span class="muted">{{ memberships|length }}</span>
+      </div>
+      {% if memberships %}
+        <ul class="list">
+          {% for membership in memberships %}
+            <li class="item">
+              <div class="item__left">
+                <div class="item__thumb">{{ membership.room.Romname|first|upper }}</div>
+                <div>
+                  <div class="item__title">{{ membership.room.Romname }}</div>
+                  <div class="item__meta">
+                    참여일: {{ membership.joined_at|date:"Y.m.d" }} · 역할: {{ membership.get_role_display }}
+                  </div>
+                </div>
+              </div>
+              <a class="link" href="{% url 'room-detail' membership.room.slug %}">입장</a>
+            </li>
+          {% empty %}
+            <li class="muted">참여 중인 방이 없습니다.</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">참여 중인 방이 없습니다.</p>
+      {% endif %}
+    </article>
+  </div>
+</div>
+{% endwith %}
+
+<div id="profile-edit-modal"
+     class="modal{% if show_profile_modal %} is-open{% endif %}"
+     {% if not show_profile_modal %}hidden{% endif %}
+     role="dialog" aria-modal="true" aria-labelledby="profileEditTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__content" role="document">
+    <header class="modal__header">
+      <h2 id="profileEditTitle">프로필 수정</h2>
+      <button type="button" class="modal__close" data-modal-close aria-label="닫기">×</button>
+    </header>
+
+    <form method="post" action="{% url 'mypage' %}" enctype="multipart/form-data" class="modal__body form">
+      {% csrf_token %}
+
+      {% if profile_form.non_field_errors %}
+        <div class="form-error-global">{{ profile_form.non_field_errors }}</div>
+      {% endif %}
+
+      <label class="field">
+        <span class="field__label">{{ profile_form.avatar.label }}</span>
+        {{ profile_form.avatar }}
+        {% if profile_form.avatar.errors %}
+          <p class="form-error">{{ profile_form.avatar.errors|striptags }}</p>
+        {% endif %}
+      </label>
+
+      <label class="field">
+        <span class="field__label">{{ profile_form.display_name.label }}</span>
+        {{ profile_form.display_name }}
+        {% if profile_form.display_name.errors %}
+          <p class="form-error">{{ profile_form.display_name.errors|striptags }}</p>
+        {% endif %}
+      </label>
+
+      <label class="field">
+        <span class="field__label">{{ profile_form.phone.label }}</span>
+        {{ profile_form.phone }}
+        {% if profile_form.phone.errors %}
+          <p class="form-error">{{ profile_form.phone.errors|striptags }}</p>
+        {% endif %}
+      </label>
+
+      <label class="field">
+        <span class="field__label">{{ profile_form.birth_date.label }}</span>
+        {{ profile_form.birth_date }}
+        {% if profile_form.birth_date.errors %}
+          <p class="form-error">{{ profile_form.birth_date.errors|striptags }}</p>
+        {% endif %}
+      </label>
+
+      <div class="modal__footer">
+        <button type="submit" class="btn btn--brand">저장</button>
+        <button type="button" class="btn" data-modal-close>취소</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'js/mypage.js' %}"></script>
+{% endblock %}

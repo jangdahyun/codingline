@@ -1,0 +1,80 @@
+{% load i18n static %}
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% trans "아이디 찾기" %}</title>
+  <link id="auth-style" rel="stylesheet" href="{% static 'css/login_signup20251017.css' %}">
+</head>
+<body class="page-body">
+  <div class="bg-layer"></div>
+  <div id="authView" data-view="find-id">
+    <main class="modal-shell" role="dialog" aria-labelledby="findIdTitle" aria-modal="true">
+      <aside class="modal-side">
+        <div class="side-graphic" aria-hidden="true"></div>
+        <h2 class="side-title">{% trans "아이디를 잊으셨나요?" %}</h2>
+        <p class="side-subtitle">{% trans "등록한 닉네임과 생년월일로 계정을 찾아드립니다." %}</p>
+      </aside>
+
+      <section class="modal-content">
+        <header class="content-header">
+          <h1 id="findIdTitle" class="content-title">{% trans "아이디 찾기" %}</h1>
+        </header>
+        
+        {%if messages%}
+          <div class="message-container">
+            {% for message in messages %}
+              <div class="message {{ message.tags }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <form method="post" action="" class="signup-form" novalidate>
+          {% csrf_token %}
+
+          {% if form.non_field_errors %}
+            <div class="form-error-global">{{ form.non_field_errors }}</div>
+          {% endif %}
+
+          <div class="form-group">
+            <label for="{{ form.display_name.id_for_label }}">{% trans "닉네임" %}</label>
+            <input id="{{ form.display_name.id_for_label }}"
+                   name="{{ form.display_name.name }}"
+                   type="text"
+                   value="{{ form.display_name.value|default_if_none:'' }}"
+                   placeholder="{% trans '예: CodingLine' %}"
+                   required />
+            {% if form.display_name.errors %}
+              <p class="form-error">{{ form.display_name.errors|striptags }}</p>
+            {% endif %}
+          </div>
+
+          <div class="form-group">
+            <label for="{{ form.birth_date.id_for_label }}">{% trans "생년월일" %}</label>
+            <input id="{{ form.birth_date.id_for_label }}"
+                   name="{{ form.birth_date.name }}"
+                   type="date"
+                   value="{{ form.birth_date.value|default_if_none:'' }}"
+                   required />
+            {% if form.birth_date.errors %}
+              <p class="form-error">{{ form.birth_date.errors|striptags }}</p>
+            {% endif %}
+          </div>
+
+          <button type="submit" class="btn-primary">{% trans "아이디 확인" %}</button>
+
+          <p class="switch-auth">
+            <a href="{% url 'account_reset_password_verify' %}" class="link auth-nav">{% trans "비밀번호 찾기" %}</a>
+            ·
+            <a href="{% url 'account_login' %}" class="link auth-nav">{% trans "로그인으로 돌아가기" %}</a>
+          </p>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script src="{% static 'js/signup.js' %}?v={% now 'U' %}"></script>
+  <script src="{% static 'js/auth-pjax.js' %}"></script>
+</body>
+</html>

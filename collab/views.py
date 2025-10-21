@@ -141,6 +141,12 @@ def room_leave(request, slug):
     room = get_object_or_404(Room, slug=slug)
     user = request.user
 
+    # 웹소켓 단계에서 이미 정리(퇴장/방 삭제/브로드캐스트)를 완료한 경우
+    skip_cleanup = request.POST.get("skip_cleanup") == "1"
+    if skip_cleanup:
+        logger.info("방 나감(WS 처리): user=%s, room=%s", user.pk, room.pk)
+        return redirect("home")
+
     # 삭제 후에도 식별할 값들 미리 보관
     room_id = room.pk
     room_slug = room.slug
@@ -536,4 +542,3 @@ def api_room_delete(request, slug):
     # 폼 제출이면 메시지 + 홈으로 이동
     messages.success(request, "방이 삭제되었습니다.")
     return redirect("home")
-

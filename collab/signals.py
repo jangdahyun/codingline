@@ -22,7 +22,7 @@ def _broadcast(payload:dict):
 def on_room_save(sender, instance: Room, created:bool, **kwargs):
     def _after_commit():
         if created:
-            _broadcast({"event": "room_created", "room_slug": instance.slug,"room_id": instance.id})
+            _broadcast({"event": "room_created", "room_slug": instance.slug,"room_id": instance.id,"ceated_at": instance.created_at.isoformat(),"topic": instance.topic})
             log_step(logger, "로비 이벤트 브로드캐스트", "방생성", {"event": "room_created", "room_slug": instance.slug,"room_id": instance.id})
         else:
             _broadcast({"event": "room_updated", "room_slug": instance.slug})

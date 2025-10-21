@@ -112,6 +112,18 @@ button:focus, a:focus { outline: 2px solid rgba(88,101,242,.6); outline-offset: 
   border: 1px solid rgba(0,0,0,.1);
   font-size: 13px;
 }
+.btn-naver {
+  display: inline-block;
+  width: 25%;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  text-align: center;
+  background: #6bd426;      /* 카카오 노랑 */
+  color: #000;
+  border: 1px solid rgba(0,0,0,.1);
+  font-size: 13px;
+}
 .social-divider {
   position: relative;
   margin: 16px 0;
@@ -119,7 +131,6 @@ button:focus, a:focus { outline: 2px solid rgba(88,101,242,.6); outline-offset: 
 }
 .social-divider span {
   padding: 0 8px;
-  background: #fff;
 }
 .social-divider::before {
   content: "";

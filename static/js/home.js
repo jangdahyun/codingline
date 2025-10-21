@@ -2,6 +2,7 @@
 (() => {
   const list = document.getElementById("room-list");
   if (!list) return;
+  
 
   // 1) WebSocket URL 구성
   const scheme = (location.protocol === "https:") ? "wss" : "ws";
@@ -103,10 +104,35 @@
     const ev   = data.event;                      // "room_updated" | "room_closed" | "room_created"
     const slug = data.slug || data.room_slug;     // slug 별칭
     const id   = data.id   || data.room_id;       // id 별칭
+    
 
     if (!ev) return;
+    
+    if (ev === "snapshot") {
+      const rooms = Array.isArray(data.rooms) ? data.rooms : [];
+      const known = new Set();
+      list.innerHTML = "";
+      rooms.forEach(room => {
+        known.add(room.slug || room.room_slug || room.id);
+        upsertRoomCard({
+          id: room.id,
+          slug: room.slug,
+          name: room.name,
+          topic: room.topic,
+          owner: room.owner,
+          created_at: room.created_at,
+          locked: room.requires_password,
+        });
+      });
+      // 이미 있던 카드 중 스냅샷에 없는 것은 제거
+      list.querySelectorAll("li[data-room-slug]").forEach(li => {
+        const key = li.getAttribute("data-room-slug");
+        if (!known.has(key)) li.remove();
+      });
+      return;
+    }
 
-    if (ev === "room_closed" || ev === "room_deleted") {
+    if (ev === "room_deleted") {
       if (slug) removeRoomBySlug(slug);
       // (선택) 사용자에게 알림
       if (typeof window.showToast === "function") {

@@ -1,0 +1,118 @@
+/* ===== Room Detail 전용 ===== */
+
+.hidden { display: none !important; }
+
+/* 2열 레이아웃: 왼쪽(메인) 1fr / 오른쪽(사이드바) 380px — 항상 2열 유지 */
+.room-layout{
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 380px; /* 오른쪽 고정폭 */
+  gap: 24px;
+  align-items: start;     /* 사이드바 상단 붙이기 */
+}
+
+/* 이미지 뷰어: 일정 박스 안에서만 보이도록 */
+.image-viewer{
+  position: relative;           /* ← 오버레이/툴바 절대배치 기준 */
+  width: 100%;
+  height: 72vh;                 /* 고정 높이 */
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;              /* 박스 밖으로 안 나감 */
+}
+.image-viewer__empty{ color:#9aa3ad; font-size:13px; }
+.image-viewer__img{
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;           /* 큰 이미지도 비율 유지 */
+  display: none;                 /* JS에서 show(el,'block')로 보여줌 */
+}
+
+/* ←← 드로잉 전용: 이미지 위를 덮는 캔버스/툴바 */
+.draw__canvas{
+  position: absolute;
+  inset: 0;
+  z-index: 10;                   /* 이미지 위, 내비/툴바 아래 */
+  touch-action: none;            /* 터치 스크롤 대신 그리기 */
+  cursor: crosshair;
+}
+.draw__toolbar{
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 20;                   /* 캔버스보다 위 */
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: rgba(255,255,255,0.92);
+  color: #111;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  backdrop-filter: blur(2px);
+}
+.draw__label{
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+.draw__btn{
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #111;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 9px;
+}
+
+/* 내비게이션/인디케이터 (드로잉 위로 올라오도록 z-index ↑) */
+.image-viewer__nav{
+  position: absolute; top: 50%; transform: translateY(-50%);
+  padding: 8px 12px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: rgba(255,255,255,.88); color:#111; display: none;
+  z-index: 30;                   /* 캔버스/툴바 위에 클릭 가능 */
+}
+.image-viewer__nav--prev{ left:10px; }
+.image-viewer__nav--next{ right:10px; }
+.image-viewer__ind{
+  position: absolute; left:50%; transform:translateX(-50%); bottom:10px;
+  padding: 4px 10px; font-size:12px; border-radius:999px;
+  background: rgba(0,0,0,.55); color:#fff; display: none;
+  z-index: 30;                   /* 캔버스/툴바 위 표시 */
+}
+
+/* 오른쪽 사이드바: 상단 고정 느낌 */
+.sidebar{
+  position: sticky; top: 16px;   /* 스크롤 내려도 상단 고정 */
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+/* 카드 공통 */
+.card{ background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+
+/* 접속자 리스트 */
+.online__list{ display:flex; flex-direction:column; gap:8px; max-height:220px; overflow:auto; padding-right:4px; }
+.online__item{ display:flex; justify-content:space-between; align-items:center; border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+
+/* 채팅 박스: 높이 고정, 내부만 스크롤 */
+.chat{ display:flex; flex-direction:column; height: 60vh; }
+.chat__head{ padding:8px 12px; border-bottom:1px solid var(--line); font-size:13px; font-weight:600; }
+.chat__log{
+  flex: 1;
+  overflow: auto;                /* 오직 이 영역만 스크롤 */
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.chat__foot{ border-top:1px solid var(--line); padding:10px; }
+.chat__form{ display:flex; gap:8px; }
+.chat__input{ flex:1; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#0f1215; color:var(--text); }
+.chat__send{ padding:8px 12px; border:1px solid var(--line); border-radius:10px; background:#101317; color:var(--text); }
+
+/* 업로드 폼 */
+.upload__form{ display:flex; align-items:center; gap:8px; }
+.upload__input{ border:1px solid var(--line); border-radius:10px; padding:6px 8px; background:#0f1215; color:var(--text); }
+.upload__btn{ padding:8px 12px; border:1px solid var(--line); border-radius:10px; background:#101317; color:var(--text); }

@@ -1,9 +1,11 @@
 # forms.py
-
+from genericpath import exists
+from django.contrib.auth.decorators import login_required
 import re
 from django import forms
 from django.core.exceptions import ValidationError
 from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import SetPasswordForm
 from allauth.account.forms import LoginForm, SignupForm as AccountSignupForm
 from allauth.socialaccount.forms import SignupForm as SocialSignupForm
 from allauth.account.adapter import get_adapter
@@ -93,6 +95,16 @@ class ExtraFieldsMixin(forms.Form):
         if phone and phone_in_use(phone):
             raise ValidationError("이미 사용 중인 전화번호예요.")
         return phone
+    
+    def clean_display_name(self):
+        nickname = (self.cleaned_data.get("nickname") or "").strip()
+        if not nickname:
+            raise ValidationError("닉네임을 입력해주세요.")
+
+        qs = User.objects.filter(display_name=nickname)
+        if qs.exists():
+            raise ValidationError("이미 사용 중인 닉네임이에요.")
+        return nickname
 
     def _save_extra_to_user(self, user):
         cd = self.cleaned_data
@@ -137,3 +149,85 @@ class MySocialSignupForm(ExtraFieldsMixin, SocialSignupForm):
     def save(self, request):
         user = super().save(request)
         return self._save_extra_to_user(user)
+
+class UsernameFindForm(forms.Form):
+    display_name = forms.CharField(label="닉네임", max_length=150)
+    birth_date = forms.DateField(label="생년월일", widget=forms.DateInput(attrs={"type": "date"}))
+
+    def clean(self):
+        cleaned = super().clean()
+        display = cleaned.get("display_name")
+        birth = cleaned.get("birth_date")
+        if display and birth:
+            qs = User.objects.filter(display_name=display, birth_date=birth)
+            if not qs.exists():
+                raise ValidationError("일치하는 계정이 없습니다.")
+            self.user = qs.first()
+        return cleaned
+
+
+class PasswordResetVerifyForm(forms.Form):
+    username = forms.CharField(label="아이디", max_length=150)
+    display_name = forms.CharField(label="닉네임", max_length=150)
+    birth_date = forms.DateField(label="생년월일", widget=forms.DateInput(attrs={"type": "date"}))
+
+    def clean(self):
+        cleaned = super().clean()
+        username = cleaned.get("username")
+        display = cleaned.get("display_name")
+        birth = cleaned.get("birth_date")
+        if username and display and birth:
+            qs = User.objects.filter(
+                username=username,
+                display_name=display,
+                birth_date=birth,
+            )
+            if not qs.exists():
+                raise ValidationError("일치하는 계정이 없습니다.")
+            self.user = qs.first()
+        return cleaned
+
+
+class PasswordResetSetForm(SetPasswordForm):
+    """SetPasswordForm 그대로 활용 (폼 이름만 맞춤)."""
+    pass
+
+class ProfileUpdateForm(forms.ModelForm):
+    phone = forms.CharField(
+        label="전화번호",
+        required=False,
+        max_length=20,
+        widget=forms.TextInput(attrs={"placeholder": "010-1234-5678", "autocomplete": "tel"}),
+    )
+
+    class Meta:
+        model = User
+        fields = ["avatar", "display_name", "phone", "birth_date"]
+        labels = {
+            "avatar": "프로필 사진",
+            "display_name": "닉네임",
+            "phone": "전화번호",
+            "birth_date": "생년월일",
+        }
+        widgets = {
+            "display_name": forms.TextInput(attrs={"maxlength": 30, "placeholder": "닉네임"}),
+            "birth_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+    def clean_display_name(self):
+        nickname = (self.cleaned_data.get("display_name") or "").strip()
+        if not nickname:
+            raise ValidationError("닉네임을 입력해주세요.")
+
+        qs = User.objects.exclude(pk=self.instance.pk).filter(display_name=nickname)
+        if qs.exists():
+            raise ValidationError("이미 사용 중인 닉네임이에요.")
+        return nickname
+
+    def clean_phone(self):
+        phone = normalize_phone(self.cleaned_data.get("phone") or "")
+        if not phone:
+            return ""
+        if User.objects.exclude(pk=self.instance.pk).filter(phone=phone).exists():
+            raise ValidationError("이미 사용 중인 전화번호예요.")
+        return phone
