@@ -1,4 +1,5 @@
 {% load i18n static %}
+{% static 'profile/basic.jpg' as default_avatar %}
 <!doctype html>
 <html lang="ko">
 <head>
@@ -23,12 +24,23 @@
       </header>
 
       <!-- ▼▼▼ 이 래퍼의 내부만 교체됩니다 ▼▼▼ -->
-        <form method="post" action="{% url 'account_signup' %}" class="signup-form" novalidate>
+        <form method="post" action="{% url 'account_signup' %}" class="signup-form" enctype="multipart/form-data" novalidate>
           {% csrf_token %}
 
           {% if form.non_field_errors %}
             <div class="form-error-global">{{ form.non_field_errors }}</div>
           {% endif %}
+
+          <div class="form-group" data-avatar-field>
+            <label for="id_avatar">프로필 이미지</label>
+            <div class="avatar-preview">
+              <img src="{{ default_avatar }}" data-avatar-preview data-default-src="{{ default_avatar }}"
+                   alt="프로필 미리보기" style="width:72px;height:72px;border-radius:9999px;object-fit:cover;border:1px solid #e5e7eb;">
+            </div>
+            {{ form.avatar }}
+            {% if form.avatar.errors %}<p class="form-error">{{ form.avatar.errors|striptags }}</p>{% endif %}
+            <p class="form-hint">이미지를 선택하지 않으면 기본 이미지가 사용됩니다.</p>
+          </div>
 
           <div class="form-group">
             <label for="id_email">{% trans "이메일" %}</label>
@@ -118,6 +130,7 @@
   </main>
 </div>
 
+  <script src="{% static 'js/avatar-preview.js' %}?v={% now 'U' %}"></script>
   <script src="{% static 'js/signup.js' %}?v={% now 'U' %}"></script>
   <!-- PJAX 스크립트 추가 -->
   <script src="{% static 'js/auth-pjax.js' %}"></script>

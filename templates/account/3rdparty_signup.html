@@ -1,8 +1,9 @@
 {# templates/account/3rdparty_signup.html #}
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n static %}
 {% block content %}
 <div class="container mx-auto max-w-xl py-8">
+  {% static 'profile/basic.jpg' as default_avatar %}
 
   {% if not sociallogin %}
     <h1 class="text-xl font-bold mb-3">세션이 만료되었어요</h1>
@@ -12,8 +13,12 @@
 
     {% with provider=sociallogin.account.provider|default:sociallogin.account.get_provider.name|lower data=sociallogin.account.extra_data %}
       {{ data|json_script:"sl-extra" }}
+      {% comment %} <div class="text-xs text-gray-500 mb-2">
+        provider = {{ provider|default:"(empty)" }}
+      </div> {% endcomment %}
 
-      {% if provider|slice:":5" == 'kakao' %}
+
+      {% if provider|slice:":5" == '카카오' %}
         <h1 class="text-2xl font-bold mb-4">카카오 계정으로 추가 정보 입력</h1>
       {% elif provider|slice:":5" == 'naver' %}
         <h1 class="text-2xl font-bold mb-4">네이버 계정으로 추가 정보 입력</h1>
@@ -24,12 +29,8 @@
       <div class="rounded border p-4 mb-6">
         <h2 class="font-semibold mb-3">소셜에서 가져온 프로필</h2>
 
-        {% if provider|slice:":5" == 'kakao' %}
+        {% if provider|slice:":5" == '카카오' %}
           {% with profile=data.kakao_account.profile props=data.properties %}
-            {% if profile.profile_image_url or profile.thumbnail_image_url or props.profile_image or props.thumbnail_image %}
-              <img src="{{ profile.profile_image_url|default:profile.thumbnail_image_url|default:props.profile_image|default:props.thumbnail_image }}"
-                   alt="프로필 이미지" width="72" height="72" class="rounded-full mb-3">
-            {% endif %}
             <p class="mb-1">닉네임: <strong>{{ profile.nickname|default:props.nickname }}</strong></p>
             <p class="text-sm text-gray-500">카카오는 닉네임/이미지만 저장합니다.</p>
           {% endwith %}
@@ -44,9 +45,6 @@
                 console.log('[3rdparty_signup][naver] resp:', resp);
               } catch (e) { console.warn('naver-resp parse fail', e); }
             </script>
-            {% if resp.profile_image or resp.profile_image_url %}
-              <img src="{{ resp.profile_image }}" alt="프로필 이미지" width="72" height="72" class="rounded-full mb-3">
-            {% endif %}
             <p class="mb-1">사용자명: <strong>{{ resp.name}}</strong></p>
             <p class="mb-1">닉네임: <strong>{{ resp.nickname}}</strong></p>
             {% if resp.email %}<p class="mb-1">이메일: <strong>{{ resp.email }}</strong></p>{% endif %}
@@ -64,16 +62,28 @@
       </div>
 
       {# ✅ 폼: 반드시 socialaccount_signup로 보냄 #}
-      <form id="social-signup-form" method="post" action="{% url 'socialaccount_signup' %}">
+      <form id="social-signup-form" method="post" action="{% url 'socialaccount_signup' %}" enctype="multipart/form-data">
         {% csrf_token %}
-        
-        {# 🔎 폼 에러를 화면에 노출해 원인 파악 #}
-        {% if form.errors %}
-          <pre class="p-3 mb-3 rounded bg-red-50 text-red-700 text-sm">{{ form.errors }}</pre>
-        {% endif %}
-        {% if form.non_field_errors %}
-          <pre class="p-3 mb-3 rounded bg-orange-50 text-orange-700 text-sm">{{ form.non_field_errors }}</pre>
-        {% endif %}
+
+        <p data-required-warning class="hidden text-sm text-red-600 mb-3"></p>
+
+        <div class="mb-6" data-avatar-field>
+          <label for="id_avatar" class="block font-medium mb-2">프로필 이미지</label>
+          {% with preview_src=social_avatar_url|default:default_avatar %}
+            <div class="flex items-center gap-4 mb-2">
+              <img src="{{ preview_src }}" alt="프로필 미리보기"
+                   class="porfile"
+                   data-avatar-preview data-default-src="{{ preview_src }}" style="width:72px;height:72px;border-radius:9999px;object-fit:cover;border:1px solid #e5e7eb;">
+              {{ form.avatar }}
+            </div>
+          {% endwith %}
+          {% if form.avatar.errors %}
+            <p class="text-sm text-red-600">{{ form.avatar.errors|striptags }}</p>
+          {% endif %}
+          <p class="text-xs text-gray-500">
+            소셜에서 제공된 이미지를 기본으로 사용하며, 다른 사진을 선택하면 교체할 수 있어요.
+          </p>
+        </div>
 
         <div class="mb-4">
           {{ form.username.label_tag }}<br>
@@ -120,23 +130,16 @@
         
       </form>
 
-      <script>
-        // 🔎 제출 직전에 실제 전송되는 payload 콘솔로 확인
-        document.addEventListener('submit', (e) => {
-          const f = e.target.closest('#social-signup-form');
-          if (!f) return;
-          const fd = new FormData(f);
-          const obj = {};
-          fd.forEach((v, k) => obj[k] = v);
-          console.log('[3rdparty_signup][submit] payload =', obj);
-          // e.preventDefault(); // 디버그를 위해 막고 싶으면 주석 해제
-        });
-      </script>
     {% endwith %}
 
     <div class="mt-4">
       <a href="{% url 'account_login' %}" class="text-sm text-gray-600">다른 방법으로 로그인</a>
     </div>
-  {% endif %}]
+  {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'js/avatar-preview.js' %}?v={% now 'U' %}"></script>
 {% endblock %}

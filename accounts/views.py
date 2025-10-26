@@ -13,11 +13,34 @@ from django.views.generic import FormView
 
 from .forms import UsernameFindForm, PasswordResetVerifyForm, PasswordResetSetForm, ProfileUpdateForm
 
+
+def _get_social_avatar_url(sociallogin):
+    """Return provider-supplied avatar URL if available."""
+    acc = getattr(sociallogin, "account", None)
+    if not acc:
+        return ""
+    provider = (acc.provider or "").lower()
+    extra = acc.extra_data or {}
+
+    if provider.startswith("카카오"):
+        kakao_account = extra.get("kakao_account") or {}
+        profile = kakao_account.get("profile") or {}
+        props = extra.get("properties") or {}
+        return (
+            profile.get("profile_image_url")
+            or profile.get("thumbnail_image_url")
+            or props.get("profile_image")
+            or props.get("thumbnail_image")
+            or ""
+        )
+    if provider.startswith("naver"):
+        resp = extra.get("response") or extra
+        return resp.get("profile_image") or resp.get("profile_image_url") or ""
+    return ""
+
 logger = logging.getLogger("accounts")
 
 class CustomSocialSignupView(AllauthSocialSignupView):
-    # 템플릿 실제 위치에 맞춰주세요.
-    # 에러 메시지에 'templates/account/3rdparty_signup.html' 로 나왔으니:
     template_name = "account/3rdparty_signup.html"
 
     def get_context_data(self, **kwargs):
@@ -33,6 +56,7 @@ class CustomSocialSignupView(AllauthSocialSignupView):
             if getattr(sl, "account", None):
                 ctx["provider_id"] = sl.account.provider     # 'kakao' / 'naver'
                 ctx["extra_data"] = sl.account.extra_data    # 원본 JSON
+                ctx["social_avatar_url"] = _get_social_avatar_url(sl)
                 logger.info(f"CustomSocialSignupView: sociallogin 있음(provider={ctx['extra_data']})")
         else:
             logger.info("CustomSocialSignupView: sociallogin 없음(직접 접근/세션만료 가능성)")

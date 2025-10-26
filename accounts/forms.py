@@ -84,10 +84,15 @@ def social_initials(sl) -> dict:
 
 # ── 공통 필드 + 저장 ─────────────────────────────────────────────
 class ExtraFieldsMixin(forms.Form):
-    nickname     = forms.CharField(label="닉네임", required=False, max_length=30)
-    phone_number = forms.CharField(label="전화번호", required=False, max_length=20,
+    avatar       = forms.ImageField(label="프로필 이미지", required=False,
+                                    widget=forms.ClearableFileInput(attrs={
+                                        "accept": "image/*",
+                                        "data-avatar-input": "1",
+                                    }))
+    nickname     = forms.CharField(label="닉네임", required=True, max_length=30)
+    phone_number = forms.CharField(label="전화번호", required=True, max_length=20,
                                    widget=forms.TextInput(attrs={"autocomplete": "tel"}))
-    birth_date   = forms.DateField(label="생년월일", required=False,
+    birth_date   = forms.DateField(label="생년월일", required=True,
                                    widget=forms.DateInput(attrs={"type": "date"}))
 
     def clean_phone_number(self):
@@ -96,7 +101,7 @@ class ExtraFieldsMixin(forms.Form):
             raise ValidationError("이미 사용 중인 전화번호예요.")
         return phone
     
-    def clean_display_name(self):
+    def clean_nickname(self):
         nickname = (self.cleaned_data.get("nickname") or "").strip()
         if not nickname:
             raise ValidationError("닉네임을 입력해주세요.")
@@ -108,6 +113,9 @@ class ExtraFieldsMixin(forms.Form):
 
     def _save_extra_to_user(self, user):
         cd = self.cleaned_data
+        avatar = cd.get("avatar")
+        if avatar:
+            user.avatar = avatar
         if cd.get("nickname"):
             if hasattr(user, "display_name"): user.display_name = cd["nickname"]
             elif hasattr(user, "nickname"):   user.nickname     = cd["nickname"]
@@ -141,10 +149,12 @@ class MySocialSignupForm(ExtraFieldsMixin, SocialSignupForm):
                     self.fields[k].initial = v
 
     def clean_username(self):
-        v = self.cleaned_data.get("username")
-        if not v:
-            v = self.initial.get("username") or self.fields["username"].initial
-        return v
+        username = super().clean_username()
+        if not username:
+            username = self.initial.get("username") or self.fields["username"].initial
+        if username and User.objects.filter(username=username).exists():
+            raise ValidationError("이미 사용 중인 아이디예요.")
+        return username
 
     def save(self, request):
         user = super().save(request)
